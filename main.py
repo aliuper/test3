@@ -1,2052 +1,2286 @@
 """
-IPTV Editor Pro - Gelişmiş IPTV Düzenleyici
-Python + Kivy ile Android APK
-Version: 2.0.0
+IPTV Editor Pro v5.0
+Tam Özellikli - Profesyonel Tasarım
+Tüm özellikler: Manuel/Otomatik düzenleme, Link testi, Ülke filtreleme
 """
 
 import os
 import sys
 import re
-import json
 import traceback
 import threading
 from datetime import datetime
 from urllib.parse import urlparse
-from functools import partial
 
-# Hata yakalama - Android'de log dosyasına yazar
-def handle_exception(exc_type, exc_value, exc_traceback):
-    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    try:
-        from android.storage import primary_external_storage_path
-        log_path = os.path.join(primary_external_storage_path(), 'Download', 'iptv_error.txt')
-    except:
-        log_path = '/sdcard/Download/iptv_error.txt'
-    try:
-        with open(log_path, 'w') as f:
-            f.write(error_msg)
-    except:
-        pass
+# ==================== HATA YAKALAMA ====================
+def setup_error_handler():
+    def handler(exc_type, exc_value, exc_tb):
+        msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            from android.storage import primary_external_storage_path
+            p = os.path.join(primary_external_storage_path(), 'Download', 'iptv_error.txt')
+        except:
+            p = '/sdcard/Download/iptv_error.txt'
+        try:
+            open(p, 'w').write(msg)
+        except:
+            pass
+    sys.excepthook = handler
 
-sys.excepthook = handle_exception
+setup_error_handler()
 
-# Kivy ayarları - import'lardan önce olmalı
-os.environ['KIVY_LOG_LEVEL'] = 'warning'
-
-import requests
+# ==================== KIVY IMPORTS ====================
 from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivy.lang import Builder
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition, NoTransition
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.button import Button
+from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.spinner import Spinner
+from kivy.uix.image import AsyncImage
 from kivy.clock import Clock
-from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle, Rectangle
 from kivy.metrics import dp
+from kivy.core.window import Window
+from kivy.properties import StringProperty, BooleanProperty, NumericProperty, ListProperty
 from kivy.utils import get_color_from_hex
-from kivy.properties import BooleanProperty
 
-# Renk Paleti
+import requests
+
+# ==================== KV TASARIM ====================
+# KV dili ile tasarım - Android'de daha stabil çalışır
+KV_DESIGN = '''
+#:import dp kivy.metrics.dp
+#:import get_color_from_hex kivy.utils.get_color_from_hex
+
+# ===== RENKLER =====
+#:set BG_DARK '#1a1a2e'
+#:set BG_MEDIUM '#16213e'
+#:set BG_CARD '#252542'
+#:set PRIMARY '#7c6aef'
+#:set PRIMARY_LIGHT '#9d8df7'
+#:set SECONDARY '#f7717d'
+#:set SUCCESS '#56d4bc'
+#:set WARNING '#ffd369'
+#:set DANGER '#ff6b6b'
+#:set TEXT_WHITE '#ffffff'
+#:set TEXT_GRAY '#a0a0b8'
+#:set BORDER '#3d3d5c'
+
+# ===== TEMEL WIDGETLAR =====
+<StyledButton@Button>:
+    background_normal: ''
+    background_color: get_color_from_hex(PRIMARY)
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(15)
+    size_hint_y: None
+    height: dp(48)
+    bold: True
+
+<SecondaryButton@Button>:
+    background_normal: ''
+    background_color: get_color_from_hex(SECONDARY)
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(15)
+    size_hint_y: None
+    height: dp(48)
+    bold: True
+
+<SuccessButton@Button>:
+    background_normal: ''
+    background_color: get_color_from_hex(SUCCESS)
+    color: get_color_from_hex(BG_DARK)
+    font_size: dp(15)
+    size_hint_y: None
+    height: dp(48)
+    bold: True
+
+<DarkButton@Button>:
+    background_normal: ''
+    background_color: get_color_from_hex(BG_CARD)
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(14)
+    size_hint_y: None
+    height: dp(44)
+
+<CardBox@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(15)
+    spacing: dp(10)
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex(BG_CARD)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+
+<TitleLabel@Label>:
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(24)
+    bold: True
+    size_hint_y: None
+    height: dp(40)
+
+<SubtitleLabel@Label>:
+    color: get_color_from_hex(TEXT_GRAY)
+    font_size: dp(14)
+    size_hint_y: None
+    height: dp(25)
+
+<SmallLabel@Label>:
+    color: get_color_from_hex(TEXT_GRAY)
+    font_size: dp(12)
+    size_hint_y: None
+    height: dp(20)
+
+<StyledInput@TextInput>:
+    background_color: get_color_from_hex(BG_MEDIUM)
+    foreground_color: get_color_from_hex(TEXT_WHITE)
+    cursor_color: get_color_from_hex(PRIMARY)
+    font_size: dp(14)
+    padding: [dp(12), dp(10)]
+    size_hint_y: None
+    height: dp(48)
+    multiline: False
+
+<MultiLineInput@TextInput>:
+    background_color: get_color_from_hex(BG_MEDIUM)
+    foreground_color: get_color_from_hex(TEXT_WHITE)
+    cursor_color: get_color_from_hex(PRIMARY)
+    font_size: dp(13)
+    padding: [dp(12), dp(10)]
+
+# ===== EKRANLAR =====
+<BaseScreen@Screen>:
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex(BG_DARK)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<ChannelGroupCard@BoxLayout>:
+    orientation: 'horizontal'
+    size_hint_y: None
+    height: dp(75)
+    padding: dp(10)
+    spacing: dp(12)
+    selected: False
+    group_name: ''
+    channel_count: 0
+    logo_url: ''
+    
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex(SUCCESS) if self.selected else get_color_from_hex(BG_CARD)
+            a: 0.25 if self.selected else 1
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+    
+    BoxLayout:
+        size_hint_x: None
+        width: dp(50)
+        Label:
+            text: '[TV]'
+            font_size: dp(22)
+            color: get_color_from_hex(PRIMARY)
+    
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(2)
+        Label:
+            text: root.group_name[:30] + ('...' if len(root.group_name) > 30 else '')
+            font_size: dp(14)
+            color: get_color_from_hex(TEXT_WHITE)
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+        Label:
+            text: str(root.channel_count) + ' kanal'
+            font_size: dp(11)
+            color: get_color_from_hex(TEXT_GRAY)
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+    
+    Button:
+        size_hint: None, None
+        size: dp(48), dp(48)
+        text: 'OK' if root.selected else '+'
+        font_size: dp(20)
+        background_normal: ''
+        background_color: get_color_from_hex(SUCCESS) if root.selected else get_color_from_hex(PRIMARY)
+        on_press: root.toggle_select()
+
+<CountryCard@ToggleButton>:
+    size_hint_y: None
+    height: dp(55)
+    background_normal: ''
+    background_color: get_color_from_hex(SUCCESS) if self.state == 'down' else get_color_from_hex(BG_CARD)
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(13)
+    bold: True
+
+<FormatButton@ToggleButton>:
+    size_hint_y: None
+    height: dp(42)
+    background_normal: ''
+    background_color: get_color_from_hex(PRIMARY) if self.state == 'down' else get_color_from_hex(BG_CARD)
+    color: get_color_from_hex(TEXT_WHITE)
+    font_size: dp(14)
+    group: 'format'
+
+<LinkTestItem@BoxLayout>:
+    orientation: 'horizontal'
+    size_hint_y: None
+    height: dp(50)
+    padding: [dp(10), dp(5)]
+    spacing: dp(10)
+    
+    Label:
+        text: root.status_icon
+        font_size: dp(20)
+        size_hint_x: None
+        width: dp(35)
+    
+    Label:
+        text: root.link_text
+        font_size: dp(11)
+        color: get_color_from_hex(root.text_color)
+        text_size: self.size
+        halign: 'left'
+        valign: 'middle'
+        shorten: True
+        shorten_from: 'right'
+'''
+
+Builder.load_string(KV_DESIGN)
+
+# ==================== RENKLER ====================
 COLORS = {
-    'primary': '#6C63FF',
-    'primary_light': '#8B85FF',
-    'secondary': '#FF6B9D',
-    'success': '#4ECDC4',
-    'warning': '#FFE66D',
-    'danger': '#FF6B6B',
-    'bg_dark': '#1A1A2E',
-    'bg_medium': '#16213E',
-    'bg_light': '#0F3460',
-    'card_bg': '#252A40',
-    'text_primary': '#FFFFFF',
-    'text_secondary': '#B8B8D1',
-    'border': '#3D3D5C',
+    'bg_dark': '#1a1a2e',
+    'bg_medium': '#16213e', 
+    'bg_card': '#252542',
+    'primary': '#7c6aef',
+    'primary_light': '#9d8df7',
+    'secondary': '#f7717d',
+    'success': '#56d4bc',
+    'warning': '#ffd369',
+    'danger': '#ff6b6b',
+    'text_white': '#ffffff',
+    'text_gray': '#a0a0b8',
 }
 
-# Ülke Kodları
-COUNTRY_CODES = {
-    'turkey': ['tr', 'tur', 'turkey', 'türkiye', 'turkiye', 'turkish', 'turk'],
-    'germany': ['de', 'ger', 'germany', 'deutschland', 'german', 'deutsch', 'deu'],
-    'romania': ['ro', 'rom', 'romania', 'romanian', 'rou'],
-    'austria': ['at', 'aut', 'austria', 'österreich', 'austrian'],
-    'france': ['fr', 'fra', 'france', 'french', 'francais'],
-    'italy': ['it', 'ita', 'italy', 'italian', 'italiano'],
-    'spain': ['es', 'esp', 'spain', 'spanish', 'espanol', 'españa'],
-    'uk': ['uk', 'gb', 'gbr', 'england', 'british', 'english'],
-    'usa': ['us', 'usa', 'america', 'american', 'united states'],
-    'netherlands': ['nl', 'nld', 'netherlands', 'dutch', 'holland'],
-    'poland': ['pl', 'pol', 'poland', 'polish', 'polska'],
-    'russia': ['ru', 'rus', 'russia', 'russian'],
-    'arabic': ['ar', 'ara', 'arabic', 'arab'],
-    'india': ['in', 'ind', 'india', 'indian', 'hindi'],
-    'portugal': ['pt', 'por', 'portugal', 'portuguese', 'brasil', 'brazil'],
-    'greece': ['gr', 'gre', 'greece', 'greek'],
-    'albania': ['al', 'alb', 'albania', 'albanian', 'shqip'],
-    'serbia': ['rs', 'srb', 'serbia', 'serbian', 'srpski'],
-    'croatia': ['hr', 'hrv', 'croatia', 'croatian', 'hrvatski'],
-    'bulgaria': ['bg', 'bgr', 'bulgaria', 'bulgarian'],
-    'other': ['other', 'misc', 'mixed', 'international', 'world']
+# ==================== ÜLKE VERİLERİ ====================
+COUNTRIES = {
+    'turkey': {
+        'name': 'Türkiye',
+        'flag': '🇹🇷',
+        'codes': ['tr', 'tur', 'turkey', 'türkiye', 'turkiye', 'turkish', 'turk', 'türk'],
+        'priority': 1
+    },
+    'germany': {
+        'name': 'Almanya', 
+        'flag': '🇩🇪',
+        'codes': ['de', 'ger', 'germany', 'deutschland', 'german', 'deutsch', 'deu', 'almanya'],
+        'priority': 2
+    },
+    'romania': {
+        'name': 'Romanya',
+        'flag': '🇷🇴', 
+        'codes': ['ro', 'rom', 'romania', 'romanian', 'rou', 'romanya'],
+        'priority': 3
+    },
+    'austria': {
+        'name': 'Avusturya',
+        'flag': '🇦🇹',
+        'codes': ['at', 'aut', 'austria', 'österreich', 'austrian', 'avusturya'],
+        'priority': 4
+    },
+    'france': {
+        'name': 'Fransa',
+        'flag': '🇫🇷',
+        'codes': ['fr', 'fra', 'france', 'french', 'francais', 'fransa'],
+        'priority': 5
+    },
+    'italy': {
+        'name': 'İtalya',
+        'flag': '🇮🇹',
+        'codes': ['it', 'ita', 'italy', 'italian', 'italiano', 'italya'],
+        'priority': 6
+    },
+    'spain': {
+        'name': 'İspanya',
+        'flag': '🇪🇸',
+        'codes': ['es', 'esp', 'spain', 'spanish', 'espanol', 'españa', 'ispanya'],
+        'priority': 7
+    },
+    'uk': {
+        'name': 'İngiltere',
+        'flag': '🇬🇧',
+        'codes': ['uk', 'gb', 'gbr', 'england', 'british', 'english', 'ingiltere'],
+        'priority': 8
+    },
+    'usa': {
+        'name': 'Amerika',
+        'flag': '🇺🇸',
+        'codes': ['us', 'usa', 'america', 'american', 'united states', 'amerika'],
+        'priority': 9
+    },
+    'netherlands': {
+        'name': 'Hollanda',
+        'flag': '🇳🇱',
+        'codes': ['nl', 'nld', 'netherlands', 'dutch', 'holland', 'hollanda'],
+        'priority': 10
+    },
+    'poland': {
+        'name': 'Polonya',
+        'flag': '🇵🇱',
+        'codes': ['pl', 'pol', 'poland', 'polish', 'polska', 'polonya'],
+        'priority': 11
+    },
+    'russia': {
+        'name': 'Rusya',
+        'flag': '🇷🇺',
+        'codes': ['ru', 'rus', 'russia', 'russian', 'rusya'],
+        'priority': 12
+    },
+    'arabic': {
+        'name': 'Arapça',
+        'flag': '🇸🇦',
+        'codes': ['ar', 'ara', 'arabic', 'arab', 'arap'],
+        'priority': 13
+    },
+    'india': {
+        'name': 'Hindistan',
+        'flag': '🇮🇳',
+        'codes': ['in', 'ind', 'india', 'indian', 'hindi', 'hindistan'],
+        'priority': 14
+    },
+    'portugal': {
+        'name': 'Portekiz',
+        'flag': '🇵🇹',
+        'codes': ['pt', 'por', 'portugal', 'portuguese', 'brasil', 'brazil', 'portekiz'],
+        'priority': 15
+    },
+    'greece': {
+        'name': 'Yunanistan',
+        'flag': '🇬🇷',
+        'codes': ['gr', 'gre', 'greece', 'greek', 'yunanistan', 'yunan'],
+        'priority': 16
+    },
+    'albania': {
+        'name': 'Arnavutluk',
+        'flag': '🇦🇱',
+        'codes': ['al', 'alb', 'albania', 'albanian', 'shqip', 'arnavut'],
+        'priority': 17
+    },
+    'serbia': {
+        'name': 'Sırbistan',
+        'flag': '🇷🇸',
+        'codes': ['rs', 'srb', 'serbia', 'serbian', 'srpski', 'sirbistan'],
+        'priority': 18
+    },
+    'croatia': {
+        'name': 'Hırvatistan',
+        'flag': '🇭🇷',
+        'codes': ['hr', 'hrv', 'croatia', 'croatian', 'hrvatski', 'hirvatistan'],
+        'priority': 19
+    },
+    'bulgaria': {
+        'name': 'Bulgaristan',
+        'flag': '🇧🇬',
+        'codes': ['bg', 'bgr', 'bulgaria', 'bulgarian', 'bulgaristan'],
+        'priority': 20
+    },
+    'other': {
+        'name': 'Diğer Ülkeler',
+        'flag': '🌍',
+        'codes': ['other', 'misc', 'mixed', 'international', 'world', 'diger'],
+        'priority': 99
+    }
 }
 
-COUNTRY_FLAGS = {
-    'turkey': '🇹🇷', 'germany': '🇩🇪', 'romania': '🇷🇴', 'austria': '🇦🇹',
-    'france': '🇫🇷', 'italy': '🇮🇹', 'spain': '🇪🇸', 'uk': '🇬🇧',
-    'usa': '🇺🇸', 'netherlands': '🇳🇱', 'poland': '🇵🇱', 'russia': '🇷🇺',
-    'arabic': '🇸🇦', 'india': '🇮🇳', 'portugal': '🇵🇹', 'greece': '🇬🇷',
-    'albania': '🇦🇱', 'serbia': '🇷🇸', 'croatia': '🇭🇷', 'bulgaria': '🇧🇬',
-    'other': '🌍'
+# Öncelikli ülkeler (ilk 4)
+PRIORITY_COUNTRIES = ['turkey', 'germany', 'romania', 'austria']
+
+# ==================== DOSYA FORMATLARI ====================
+FILE_FORMATS = {
+    'm3u': {'name': 'M3U', 'desc': 'Standart', 'ext': '.m3u'},
+    'm3u8': {'name': 'M3U8', 'desc': 'En İyi ⭐', 'ext': '.m3u8'},
+    'm3u_plus': {'name': 'M3U Plus', 'desc': 'Gelişmiş', 'ext': '.m3u'},
+    'txt': {'name': 'TXT', 'desc': 'Basit', 'ext': '.txt'},
 }
 
+# ==================== YARDIMCI FONKSİYONLAR ====================
 
-def safe_canvas_update(widget, draw_func):
-    """Güvenli canvas güncelleme - Android uyumlu"""
+def get_download_path():
+    """Android Download klasörünü döndür"""
     try:
-        widget.canvas.before.clear()
-        draw_func()
-    except Exception:
-        Clock.schedule_once(lambda dt: safe_canvas_retry(widget, draw_func), 0.1)
+        from android.storage import primary_external_storage_path
+        return os.path.join(primary_external_storage_path(), 'Download')
+    except:
+        return os.path.expanduser('~')
 
 
-def safe_canvas_retry(widget, draw_func):
-    """Canvas güncelleme retry"""
-    try:
-        widget.canvas.before.clear()
-        draw_func()
-    except Exception:
-        pass
-
-
-class RoundedButton(Button):
-    """Yuvarlatılmış köşeli özel buton"""
+def parse_m3u(content):
+    """M3U içeriğini parse et"""
+    channels = []
+    groups = {}
     
-    def __init__(self, bg_color=COLORS['primary'], **kwargs):
-        super().__init__(**kwargs)
-        self.background_color = (0, 0, 0, 0)
-        self.background_normal = ''
-        self.bg_color = bg_color
-        self._draw_scheduled = False
-        Clock.schedule_once(lambda dt: self._bind_events(), 0)
+    lines = content.split('\n')
+    current_channel = {}
+    
+    for line in lines:
+        line = line.strip()
         
-    def _bind_events(self):
-        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
-        self._do_draw()
-    
-    def _schedule_draw(self, *args):
-        if not self._draw_scheduled:
-            self._draw_scheduled = True
-            Clock.schedule_once(lambda dt: self._do_draw(), 0)
-    
-    def _do_draw(self):
-        self._draw_scheduled = False
-        def draw():
-            with self.canvas.before:
-                Color(*get_color_from_hex(self.bg_color))
-                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
-        safe_canvas_update(self, draw)
-    
-    def update_canvas(self, *args):
-        self._do_draw()
-
-
-class StyledCard(BoxLayout):
-    """Stilize edilmiş kart bileşeni"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.padding = dp(15)
-        self.spacing = dp(10)
-        self._draw_scheduled = False
-        Clock.schedule_once(lambda dt: self._bind_events(), 0)
-        
-    def _bind_events(self):
-        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
-        self._do_draw()
-    
-    def _schedule_draw(self, *args):
-        if not self._draw_scheduled:
-            self._draw_scheduled = True
-            Clock.schedule_once(lambda dt: self._do_draw(), 0)
-    
-    def _do_draw(self):
-        self._draw_scheduled = False
-        def draw():
-            with self.canvas.before:
-                Color(*get_color_from_hex(COLORS['card_bg']))
-                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(15)])
-        safe_canvas_update(self, draw)
-
-
-class ChannelGroupItem(BoxLayout):
-    """Kanal grubu liste öğesi"""
-    
-    selected = BooleanProperty(False)
-    
-    def __init__(self, group_name, channel_count, logo_url=None, on_select=None, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'horizontal'
-        self.size_hint_y = None
-        self.height = dp(70)
-        self.padding = dp(10)
-        self.spacing = dp(10)
-        self.group_name = group_name
-        self.on_select_callback = on_select
-        self._draw_scheduled = False
-        
-        Clock.schedule_once(lambda dt: self._build_ui(channel_count), 0)
-        
-    def _build_ui(self, channel_count):
-        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
-        
-        # Logo
-        logo = Label(text='📺', font_size=dp(30), size_hint=(None, None), size=(dp(50), dp(50)))
-        self.add_widget(logo)
-        
-        # Grup bilgisi
-        info_layout = BoxLayout(orientation='vertical', spacing=dp(2))
-        name_label = Label(
-            text=self.group_name,
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='left',
-            valign='middle'
-        )
-        name_label.bind(size=name_label.setter('text_size'))
-        
-        count_label = Label(
-            text=f'{channel_count} kanal',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
-            valign='middle'
-        )
-        count_label.bind(size=count_label.setter('text_size'))
-        
-        info_layout.add_widget(name_label)
-        info_layout.add_widget(count_label)
-        self.add_widget(info_layout)
-        
-        # Seçim butonu
-        self.select_btn = RoundedButton(
-            text='+',
-            size_hint=(None, None),
-            size=(dp(50), dp(50)),
-            font_size=dp(24),
-            bg_color=COLORS['primary']
-        )
-        self.select_btn.bind(on_press=self.toggle_selection)
-        self.add_widget(self.select_btn)
-        
-        self._do_draw()
-    
-    def _schedule_draw(self, *args):
-        if not self._draw_scheduled:
-            self._draw_scheduled = True
-            Clock.schedule_once(lambda dt: self._do_draw(), 0)
-    
-    def _do_draw(self):
-        self._draw_scheduled = False
-        def draw():
-            with self.canvas.before:
-                if self.selected:
-                    Color(*get_color_from_hex(COLORS['success']), 0.3)
-                else:
-                    Color(*get_color_from_hex(COLORS['card_bg']))
-                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
-        safe_canvas_update(self, draw)
+        if line.startswith('#EXTINF:'):
+            current_channel = {
+                'name': '',
+                'group': 'Diğer',
+                'logo': '',
+                'tvg_id': '',
+                'tvg_name': '',
+                'url': ''
+            }
             
-    def toggle_selection(self, instance):
-        self.selected = not self.selected
-        if self.selected:
-            self.select_btn.text = '✓'
-            self.select_btn.bg_color = COLORS['success']
-        else:
-            self.select_btn.text = '+'
-            self.select_btn.bg_color = COLORS['primary']
-        self.select_btn.update_canvas()
-        self._do_draw()
+            # Group title
+            match = re.search(r'group-title="([^"]*)"', line)
+            if match and match.group(1):
+                current_channel['group'] = match.group(1)
+            
+            # Logo
+            match = re.search(r'tvg-logo="([^"]*)"', line)
+            if match:
+                current_channel['logo'] = match.group(1)
+            
+            # TVG-ID
+            match = re.search(r'tvg-id="([^"]*)"', line)
+            if match:
+                current_channel['tvg_id'] = match.group(1)
+            
+            # TVG-Name
+            match = re.search(r'tvg-name="([^"]*)"', line)
+            if match:
+                current_channel['tvg_name'] = match.group(1)
+            
+            # Channel name
+            match = re.search(r',(.+)$', line)
+            if match:
+                current_channel['name'] = match.group(1).strip()
+                
+        elif line.startswith('http') or line.startswith('rtmp') or line.startswith('rtsp'):
+            if current_channel:
+                current_channel['url'] = line
+                channels.append(current_channel.copy())
+                
+                group_name = current_channel['group']
+                if group_name not in groups:
+                    groups[group_name] = {
+                        'channels': [],
+                        'logo': current_channel['logo']
+                    }
+                groups[group_name]['channels'].append(current_channel.copy())
+                
+            current_channel = {}
+    
+    return channels, groups
+
+
+def generate_m3u(channels, format_type='m3u'):
+    """Kanal listesinden M3U içeriği oluştur"""
+    content = '#EXTM3U\n'
+    
+    if format_type == 'm3u_plus':
+        content = '#EXTM3U url-tvg="http://epg.example.com"\n'
+    
+    for ch in channels:
+        extinf = '#EXTINF:-1'
         
+        if ch.get('tvg_id'):
+            extinf += f' tvg-id="{ch["tvg_id"]}"'
+        if ch.get('tvg_name'):
+            extinf += f' tvg-name="{ch["tvg_name"]}"'
+        if ch.get('logo'):
+            extinf += f' tvg-logo="{ch["logo"]}"'
+        if ch.get('group'):
+            extinf += f' group-title="{ch["group"]}"'
+            
+        extinf += f',{ch.get("name", "Unknown Channel")}\n'
+        content += extinf
+        content += f'{ch.get("url", "")}\n'
+    
+    return content
+
+
+def generate_txt(channels):
+    """Sadece URL'leri içeren basit TXT formatı"""
+    return '\n'.join([ch.get('url', '') for ch in channels if ch.get('url')])
+
+
+def detect_country(text):
+    """Metinden ülke tespit et"""
+    text = text.lower()
+    
+    for country_id, country_data in COUNTRIES.items():
+        for code in country_data['codes']:
+            # Tam kelime eşleşmesi için word boundary kullan
+            if re.search(rf'\b{re.escape(code)}\b', text):
+                return country_id
+            # Başında veya sonunda tire/alt çizgi ile
+            if re.search(rf'[-_]{re.escape(code)}[-_]', text):
+                return country_id
+            if text.startswith(code + ' ') or text.startswith(code + '-') or text.startswith(code + '_'):
+                return country_id
+    
+    return 'other'
+
+
+def test_link_quick(url, timeout=8):
+    """Hızlı link testi - sadece HEAD request"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
+        return response.status_code == 200, "Başarılı"
+    except requests.exceptions.Timeout:
+        return False, "Zaman aşımı"
+    except requests.exceptions.ConnectionError:
+        return False, "Bağlantı hatası"
+    except Exception as e:
+        return False, str(e)[:30]
+
+
+def test_link_deep(url, timeout=15):
+    """Derin link testi - video akışını kontrol et"""
+    try:
+        headers = {'User-Agent': 'VLC/3.0.11 LibVLC/3.0.11'}
+        response = requests.get(url, timeout=timeout, headers=headers, stream=True)
+        
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        
+        # Video verisi almaya çalış
+        total_bytes = 0
+        for chunk in response.iter_content(chunk_size=8192):
+            total_bytes += len(chunk)
+            if total_bytes > 32768:  # 32KB yeterli
+                break
+        
+        if total_bytes > 1024:
+            return True, f"Aktif ({total_bytes//1024}KB)"
+        else:
+            return False, "Veri yok"
+            
+    except requests.exceptions.Timeout:
+        return False, "Zaman aşımı"
+    except requests.exceptions.ConnectionError:
+        return False, "Bağlantı hatası"
+    except Exception as e:
+        return False, str(e)[:30]
+
+
+# ==================== CUSTOM WIDGETS ====================
+
+class ChannelGroupCard(BoxLayout):
+    """Kanal grubu kartı"""
+    selected = BooleanProperty(False)
+    group_name = StringProperty('')
+    channel_count = NumericProperty(0)
+    logo_url = StringProperty('')
+    
+    def __init__(self, on_select_callback=None, **kwargs):
+        super().__init__(**kwargs)
+        self.on_select_callback = on_select_callback
+    
+    def toggle_select(self):
+        self.selected = not self.selected
         if self.on_select_callback:
             self.on_select_callback(self.group_name, self.selected)
 
 
-class IPTVParser:
-    """M3U/M3U8 dosya ayrıştırıcı"""
-    
-    @staticmethod
-    def parse_m3u(content):
-        """M3U içeriğini ayrıştır"""
-        channels = []
-        groups = {}
-        
-        lines = content.split('\n')
-        current_channel = {}
-        
-        for line in lines:
-            line = line.strip()
-            
-            if line.startswith('#EXTINF:'):
-                current_channel = IPTVParser._parse_extinf(line)
-                
-            elif line.startswith('http') or line.startswith('rtmp'):
-                if current_channel:
-                    current_channel['url'] = line
-                    channels.append(current_channel)
-                    
-                    group = current_channel.get('group', 'Diğer')
-                    if group not in groups:
-                        groups[group] = {
-                            'channels': [],
-                            'logo': current_channel.get('logo', '')
-                        }
-                    groups[group]['channels'].append(current_channel)
-                    
-                current_channel = {}
-                
-        return channels, groups
-    
-    @staticmethod
-    def _parse_extinf(line):
-        """EXTINF satırını ayrıştır"""
-        channel = {
-            'name': '',
-            'group': 'Diğer',
-            'logo': '',
-            'duration': -1
-        }
-        
-        group_match = re.search(r'group-title="([^"]*)"', line)
-        if group_match:
-            channel['group'] = group_match.group(1) or 'Diğer'
-            
-        logo_match = re.search(r'tvg-logo="([^"]*)"', line)
-        if logo_match:
-            channel['logo'] = logo_match.group(1)
-            
-        tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
-        if tvg_id_match:
-            channel['tvg_id'] = tvg_id_match.group(1)
-            
-        tvg_name_match = re.search(r'tvg-name="([^"]*)"', line)
-        if tvg_name_match:
-            channel['tvg_name'] = tvg_name_match.group(1)
-            
-        name_match = re.search(r',(.+)$', line)
-        if name_match:
-            channel['name'] = name_match.group(1).strip()
-            
-        return channel
-    
-    @staticmethod
-    def detect_country(group_name, channel_name=''):
-        """Ülkeyi tespit et"""
-        text = f"{group_name} {channel_name}".lower()
-        
-        for country, codes in COUNTRY_CODES.items():
-            for code in codes:
-                if re.search(rf'\b{code}\b', text):
-                    return country
-                        
-        return 'other'
-    
-    @staticmethod
-    def generate_m3u(channels, format_type='m3u'):
-        """Kanal listesinden M3U içeriği oluştur"""
-        content = '#EXTM3U\n'
-        
-        for ch in channels:
-            extinf = '#EXTINF:-1'
-            
-            if ch.get('tvg_id'):
-                extinf += f' tvg-id="{ch["tvg_id"]}"'
-            if ch.get('tvg_name'):
-                extinf += f' tvg-name="{ch["tvg_name"]}"'
-            if ch.get('logo'):
-                extinf += f' tvg-logo="{ch["logo"]}"'
-            if ch.get('group'):
-                extinf += f' group-title="{ch["group"]}"'
-                
-            extinf += f',{ch.get("name", "Unknown")}\n'
-            content += extinf
-            content += f'{ch.get("url", "")}\n'
-            
-        return content
+class LinkTestItem(BoxLayout):
+    """Link test sonucu satırı"""
+    status_icon = StringProperty('⏳')
+    link_text = StringProperty('')
+    text_color = StringProperty('#a0a0b8')
 
 
-class IPTVTester:
-    """IPTV link test edici"""
-    
-    @staticmethod
-    def test_link(url, timeout=10):
-        """Tek bir linki test et"""
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
-            
-            if response.status_code == 200:
-                return True, "Başarılı"
-                
-            response = requests.get(url, timeout=timeout, headers=headers, stream=True)
-            content = next(response.iter_content(1024), None)
-            
-            if content:
-                return True, "Başarılı"
-            else:
-                return False, "İçerik yok"
-                
-        except requests.exceptions.Timeout:
-            return False, "Zaman aşımı"
-        except requests.exceptions.ConnectionError:
-            return False, "Bağlantı hatası"
-        except Exception as e:
-            return False, str(e)[:50]
-    
-    @staticmethod
-    def test_stream(url, timeout=15):
-        """Video akışını test et"""
-        try:
-            headers = {
-                'User-Agent': 'VLC/3.0.11 LibVLC/3.0.11'
-            }
-            
-            response = requests.get(url, timeout=timeout, headers=headers, stream=True)
-            
-            if response.status_code != 200:
-                return False, f"HTTP {response.status_code}"
-            
-            total_bytes = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                total_bytes += len(chunk)
-                if total_bytes > 32768:
-                    break
-                    
-            if total_bytes > 1024:
-                return True, f"Aktif ({total_bytes} bytes)"
-            else:
-                return False, "Yetersiz veri"
-                
-        except requests.exceptions.Timeout:
-            return False, "Zaman aşımı"
-        except requests.exceptions.ConnectionError:
-            return False, "Bağlantı hatası"
-        except Exception as e:
-            return False, str(e)[:50]
+# ==================== EKRANLAR ====================
 
-
-class BaseScreen(Screen):
-    """Tüm ekranlar için temel sınıf"""
+class WelcomeScreen(Screen):
+    """Ana ekran - Mod seçimi"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._bg_scheduled = False
-        Clock.schedule_once(lambda dt: self._init_bg(), 0)
+    def on_enter(self):
+        self.clear_widgets()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
     
-    def _init_bg(self):
-        self.bind(pos=self._schedule_bg, size=self._schedule_bg)
-        self._draw_bg()
-    
-    def _schedule_bg(self, *args):
-        if not self._bg_scheduled:
-            self._bg_scheduled = True
-            Clock.schedule_once(lambda dt: self._draw_bg(), 0)
-    
-    def _draw_bg(self):
-        self._bg_scheduled = False
-        def draw():
-            with self.canvas.before:
-                Color(*get_color_from_hex(COLORS['bg_dark']))
-                Rectangle(pos=self.pos, size=self.size)
-        safe_canvas_update(self, draw)
-
-
-class WelcomeScreen(BaseScreen):
-    """Karşılama ekranı"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
     def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
+        root = BoxLayout(orientation='vertical', padding=dp(25), spacing=dp(20))
         
-        # Başlık
-        title_layout = BoxLayout(orientation='vertical', size_hint_y=0.4)
+        # === HEADER ===
+        header = BoxLayout(orientation='vertical', size_hint_y=0.3, spacing=dp(5))
         
-        app_icon = Label(text='📡', font_size=dp(80))
-        title_layout.add_widget(app_icon)
+        # App icon
+        icon_label = Label(
+            text='📡',
+            font_size=dp(60),
+            size_hint_y=None,
+            height=dp(80)
+        )
+        header.add_widget(icon_label)
         
+        # Title
         title = Label(
             text='IPTV Editor Pro',
-            font_size=dp(32),
+            font_size=dp(28),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        title_layout.add_widget(title)
-        
-        subtitle = Label(
-            text='Gelişmiş IPTV Düzenleyici',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        title_layout.add_widget(subtitle)
-        
-        layout.add_widget(title_layout)
-        
-        # Mod seçimi kartları
-        cards_layout = BoxLayout(orientation='vertical', spacing=dp(20), size_hint_y=0.5)
-        
-        # Manuel mod kartı
-        manual_card = StyledCard()
-        manual_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        manual_icon = Label(text='✏️', font_size=dp(40))
-        manual_title = Label(
-            text='Manuel Düzenleme',
-            font_size=dp(20),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        manual_desc = Label(
-            text='IPTV linkini girin, kanal gruplarını\ngörüntüleyin ve istediğiniz kanalları seçin',
-            font_size=dp(13),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='center'
-        )
-        manual_desc.bind(size=manual_desc.setter('text_size'))
-        
-        manual_btn = RoundedButton(
-            text='Başla',
-            size_hint=(0.6, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['primary']
-        )
-        manual_btn.bind(on_press=self.go_manual)
-        
-        manual_inner.add_widget(manual_icon)
-        manual_inner.add_widget(manual_title)
-        manual_inner.add_widget(manual_desc)
-        manual_inner.add_widget(manual_btn)
-        manual_card.add_widget(manual_inner)
-        cards_layout.add_widget(manual_card)
-        
-        # Otomatik mod kartı
-        auto_card = StyledCard()
-        auto_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        auto_icon = Label(text='🤖', font_size=dp(40))
-        auto_title = Label(
-            text='Otomatik Düzenleme',
-            font_size=dp(20),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        auto_desc = Label(
-            text='Toplu linkleri test edin, çalışanları filtreleyin\nve ülkelere göre otomatik düzenleyin',
-            font_size=dp(13),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='center'
-        )
-        auto_desc.bind(size=auto_desc.setter('text_size'))
-        
-        auto_btn = RoundedButton(
-            text='Başla',
-            size_hint=(0.6, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['secondary']
-        )
-        auto_btn.bind(on_press=self.go_auto)
-        
-        auto_inner.add_widget(auto_icon)
-        auto_inner.add_widget(auto_title)
-        auto_inner.add_widget(auto_desc)
-        auto_inner.add_widget(auto_btn)
-        auto_card.add_widget(auto_inner)
-        cards_layout.add_widget(auto_card)
-        
-        layout.add_widget(cards_layout)
-        
-        # Alt bilgi
-        footer = Label(
-            text='v2.0.0 • Made with ❤️',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=0.1
-        )
-        layout.add_widget(footer)
-        
-        self.add_widget(layout)
-            
-    def go_manual(self, instance):
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'manual_input'
-        
-    def go_auto(self, instance):
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'auto_input'
-
-
-class ManualInputScreen(BaseScreen):
-    """Manuel mod - URL giriş ekranı"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_format = 'm3u'
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50))
-        
-        back_btn = RoundedButton(
-            text='< Geri',
-            size_hint=(None, None),
-            size=(dp(100), dp(40)),
-            bg_color=COLORS['bg_light']
-        )
-        back_btn.bind(on_press=self.go_back)
-        top_bar.add_widget(back_btn)
-        top_bar.add_widget(Label())
-        
-        layout.add_widget(top_bar)
-        
-        # Başlık
-        title = Label(
-            text='✏️ Manuel Düzenleme',
-            font_size=dp(24),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
+            color=get_color_from_hex(COLORS['text_white']),
             size_hint_y=None,
             height=dp(40)
         )
-        layout.add_widget(title)
+        header.add_widget(title)
         
-        # Açıklama
-        desc = Label(
-            text='IPTV playlist URL\'sini girin',
+        # Subtitle
+        subtitle = Label(
+            text='Gelişmiş IPTV Düzenleyici',
             font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=None,
-            height=dp(30)
-        )
-        layout.add_widget(desc)
-        
-        # URL giriş alanı
-        url_card = StyledCard(size_hint_y=None, height=dp(150))
-        url_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        url_label = Label(
-            text='Playlist URL',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
+            color=get_color_from_hex(COLORS['text_gray']),
             size_hint_y=None,
             height=dp(25)
         )
-        url_label.bind(size=url_label.setter('text_size'))
+        header.add_widget(subtitle)
+        
+        root.add_widget(header)
+        
+        # === MODE CARDS ===
+        cards = BoxLayout(orientation='vertical', spacing=dp(15), size_hint_y=0.55)
+        
+        # Manual Mode Card
+        manual_card = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(12))
+        manual_card.bind(size=self._update_card_bg, pos=self._update_card_bg)
+        self._cards = [manual_card]
+        
+        manual_icon = Label(text='✏️', font_size=dp(35), size_hint_y=None, height=dp(45))
+        manual_title = Label(
+            text='Manuel Düzenleme',
+            font_size=dp(18),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(28)
+        )
+        manual_desc = Label(
+            text='IPTV URL\'sini girin, kanal gruplarını görün\nve istediğiniz kanalları seçerek dışa aktarın',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(40),
+            halign='center'
+        )
+        manual_desc.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        
+        manual_btn = Button(
+            text='Başla',
+            font_size=dp(15),
+            bold=True,
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
+        )
+        manual_btn.bind(on_press=lambda x: self.go_to('manual_input'))
+        
+        manual_card.add_widget(manual_icon)
+        manual_card.add_widget(manual_title)
+        manual_card.add_widget(manual_desc)
+        manual_card.add_widget(manual_btn)
+        cards.add_widget(manual_card)
+        
+        # Auto Mode Card
+        auto_card = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(12))
+        auto_card.bind(size=self._update_card_bg, pos=self._update_card_bg)
+        self._cards.append(auto_card)
+        
+        auto_icon = Label(text='🤖', font_size=dp(35), size_hint_y=None, height=dp(45))
+        auto_title = Label(
+            text='Otomatik Düzenleme',
+            font_size=dp(18),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(28)
+        )
+        auto_desc = Label(
+            text='Toplu linkleri test edin, çalışanları filtreleyin\nve ülkelere göre otomatik düzenleyin',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(40),
+            halign='center'
+        )
+        auto_desc.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        
+        auto_btn = Button(
+            text='Başla',
+            font_size=dp(15),
+            bold=True,
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['secondary'])
+        )
+        auto_btn.bind(on_press=lambda x: self.go_to('auto_input'))
+        
+        auto_card.add_widget(auto_icon)
+        auto_card.add_widget(auto_title)
+        auto_card.add_widget(auto_desc)
+        auto_card.add_widget(auto_btn)
+        cards.add_widget(auto_card)
+        
+        root.add_widget(cards)
+        
+        # === FOOTER ===
+        footer = Label(
+            text='v5.0 • Made with ❤️',
+            font_size=dp(11),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=0.1
+        )
+        root.add_widget(footer)
+        
+        self.add_widget(root)
+        
+        # Draw card backgrounds
+        Clock.schedule_once(lambda dt: self._draw_all_cards(), 0.1)
+    
+    def _update_card_bg(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_card(widget), 0)
+    
+    def _draw_all_cards(self):
+        for card in getattr(self, '_cards', []):
+            self._draw_card(card)
+    
+    def _draw_card(self, card):
+        from kivy.graphics import Color, RoundedRectangle
+        card.canvas.before.clear()
+        with card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(15)])
+    
+    def go_to(self, screen_name):
+        self.manager.transition = SlideTransition(direction='left')
+        self.manager.current = screen_name
+
+
+class ManualInputScreen(Screen):
+    """Manuel mod - URL giriş ekranı"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        self.selected_format = 'm3u8'
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
+    def build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(15))
+        
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
+            size_hint=(None, None),
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        back_btn.bind(on_press=lambda x: self.go_back())
+        top_bar.add_widget(back_btn)
+        
+        title = Label(
+            text='✏️ Manuel Düzenleme',
+            font_size=dp(18),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white'])
+        )
+        top_bar.add_widget(title)
+        
+        root.add_widget(top_bar)
+        
+        # URL Input Card
+        url_card = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10), size_hint_y=None, height=dp(140))
+        url_card.bind(size=self._update_card, pos=self._update_card)
+        self._url_card = url_card
+        
+        url_label = Label(
+            text='Playlist URL',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(22),
+            halign='left'
+        )
+        url_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        url_card.add_widget(url_label)
         
         self.url_input = TextInput(
             hint_text='https://example.com/playlist.m3u',
             multiline=False,
             font_size=dp(14),
             background_color=get_color_from_hex(COLORS['bg_medium']),
-            foreground_color=get_color_from_hex(COLORS['text_primary']),
+            foreground_color=get_color_from_hex(COLORS['text_white']),
             cursor_color=get_color_from_hex(COLORS['primary']),
-            padding=[dp(15), dp(12)],
+            padding=[dp(12), dp(10)],
             size_hint_y=None,
-            height=dp(50)
+            height=dp(48)
         )
+        url_card.add_widget(self.url_input)
         
-        url_inner.add_widget(url_label)
-        url_inner.add_widget(self.url_input)
-        url_card.add_widget(url_inner)
-        layout.add_widget(url_card)
+        root.add_widget(url_card)
         
-        # Format seçimi
-        format_card = StyledCard(size_hint_y=None, height=dp(120))
-        format_inner = BoxLayout(orientation='vertical', spacing=dp(10))
+        # Format Selection Card
+        format_card = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12), size_hint_y=None, height=dp(130))
+        format_card.bind(size=self._update_card, pos=self._update_card)
+        self._format_card = format_card
         
         format_label = Label(
             text='Çıktı Formatı',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
             size_hint_y=None,
-            height=dp(25)
+            height=dp(22),
+            halign='left'
         )
-        format_label.bind(size=format_label.setter('text_size'))
+        format_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        format_card.add_widget(format_label)
         
-        format_buttons = BoxLayout(spacing=dp(10))
-        
+        format_btns = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(45))
         self.format_buttons = {}
-        formats = [('m3u', 'M3U'), ('m3u8', 'M3U8'), ('txt', 'TXT')]
         
-        for fmt, name in formats:
-            btn = RoundedButton(
-                text=name,
-                bg_color=COLORS['primary'] if fmt == 'm3u' else COLORS['bg_light']
+        for fmt_id, fmt_data in FILE_FORMATS.items():
+            btn = ToggleButton(
+                text=f"{fmt_data['name']}\n{fmt_data['desc']}",
+                group='format',
+                state='down' if fmt_id == 'm3u8' else 'normal',
+                font_size=dp(11),
+                background_normal='',
+                background_color=get_color_from_hex(COLORS['primary']) if fmt_id == 'm3u8' else get_color_from_hex(COLORS['bg_card']),
+                size_hint_y=None,
+                height=dp(45)
             )
-            btn.format_type = fmt
-            btn.bind(on_press=self.select_format)
-            self.format_buttons[fmt] = btn
-            format_buttons.add_widget(btn)
-            
-        format_inner.add_widget(format_label)
-        format_inner.add_widget(format_buttons)
-        format_card.add_widget(format_inner)
-        layout.add_widget(format_card)
+            btn.format_id = fmt_id
+            btn.bind(on_press=self.on_format_select)
+            self.format_buttons[fmt_id] = btn
+            format_btns.add_widget(btn)
+        
+        format_card.add_widget(format_btns)
+        root.add_widget(format_card)
         
         # Spacer
-        layout.add_widget(Label())
+        root.add_widget(Label())
         
-        # İleri butonu
-        next_btn = RoundedButton(
-            text='Kanalları Yükle',
-            size_hint=(1, None),
-            height=dp(55),
-            font_size=dp(18),
-            bg_color=COLORS['success']
+        # Load Button
+        load_btn = Button(
+            text='📥 Kanalları Yükle',
+            font_size=dp(16),
+            bold=True,
+            size_hint_y=None,
+            height=dp(52),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['success'])
         )
-        next_btn.bind(on_press=self.load_channels)
-        layout.add_widget(next_btn)
+        load_btn.bind(on_press=self.load_channels)
+        root.add_widget(load_btn)
         
-        self.add_widget(layout)
-        
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'welcome'
-        
-    def select_format(self, instance):
-        self.selected_format = instance.format_type
-        for fmt, btn in self.format_buttons.items():
-            if fmt == self.selected_format:
-                btn.bg_color = COLORS['primary']
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_cards(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_single_card(widget), 0)
+    
+    def _draw_cards(self):
+        self._draw_single_card(self._url_card)
+        self._draw_single_card(self._format_card)
+    
+    def _draw_single_card(self, card):
+        from kivy.graphics import Color, RoundedRectangle
+        card.canvas.before.clear()
+        with card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+    
+    def on_format_select(self, btn):
+        self.selected_format = btn.format_id
+        for fmt_id, button in self.format_buttons.items():
+            if fmt_id == self.selected_format:
+                button.background_color = get_color_from_hex(COLORS['primary'])
             else:
-                btn.bg_color = COLORS['bg_light']
-            btn.update_canvas()
-            
+                button.background_color = get_color_from_hex(COLORS['bg_card'])
+    
     def load_channels(self, instance):
         url = self.url_input.text.strip()
-        
         if not url:
-            self.show_error('Lütfen bir URL girin!')
+            self.show_popup('Hata', 'Lütfen bir URL girin!', 'error')
             return
-            
-        self.show_loading()
-        threading.Thread(target=self._load_playlist, args=(url,), daemon=True).start()
         
+        if not url.startswith('http'):
+            self.show_popup('Hata', 'Geçersiz URL formatı!', 'error')
+            return
+        
+        self.show_loading('Playlist yükleniyor...')
+        threading.Thread(target=self._load_playlist, args=(url,), daemon=True).start()
+    
     def _load_playlist(self, url):
         try:
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
             response.raise_for_status()
-            content = response.text
             
-            channels, groups = IPTVParser.parse_m3u(content)
+            channels, groups = parse_m3u(response.text)
             
-            Clock.schedule_once(lambda dt: self._on_playlist_loaded(channels, groups))
+            if not channels:
+                Clock.schedule_once(lambda dt: self._on_load_error('Kanal bulunamadı!'))
+                return
             
+            Clock.schedule_once(lambda dt: self._on_load_success(channels, groups))
+            
+        except requests.exceptions.Timeout:
+            Clock.schedule_once(lambda dt: self._on_load_error('Bağlantı zaman aşımına uğradı!'))
+        except requests.exceptions.RequestException as e:
+            Clock.schedule_once(lambda dt: self._on_load_error(f'Bağlantı hatası: {str(e)[:50]}'))
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._on_load_error(str(e)))
-            
-    def _on_playlist_loaded(self, channels, groups):
-        self.dismiss_loading()
+            Clock.schedule_once(lambda dt: self._on_load_error(f'Hata: {str(e)[:50]}'))
+    
+    def _on_load_success(self, channels, groups):
+        self.hide_loading()
         
         app = App.get_running_app()
         app.channels = channels
         app.groups = groups
         app.selected_format = self.selected_format
+        app.source_mode = 'manual'
         
-        self.manager.transition = SlideTransition(direction='left')
         self.manager.current = 'channel_list'
-        
-    def _on_load_error(self, error):
-        self.dismiss_loading()
-        self.show_error(f'Yükleme hatası: {error}')
-        
-    def show_loading(self):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        spinner_label = Label(text='⏳', font_size=dp(50))
-        content.add_widget(spinner_label)
-        
-        loading_label = Label(
-            text='Playlist yükleniyor...',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        content.add_widget(loading_label)
-        
-        progress = ProgressBar(max=100, value=50)
-        content.add_widget(progress)
-        
-        self.loading_popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.8, 0.4),
-            auto_dismiss=False,
-            separator_height=0
-        )
-        self.loading_popup.open()
-        
-    def dismiss_loading(self):
-        if hasattr(self, 'loading_popup'):
-            self.loading_popup.dismiss()
-            
-    def show_error(self, message):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        error_icon = Label(text='❌', font_size=dp(50))
-        content.add_widget(error_icon)
-        
-        error_label = Label(
-            text=message,
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='center'
-        )
-        error_label.bind(size=error_label.setter('text_size'))
-        content.add_widget(error_label)
-        
-        close_btn = RoundedButton(
-            text='Tamam',
-            size_hint=(0.5, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['danger']
-        )
-        
-        popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.85, 0.4),
-            separator_height=0
-        )
-        
-        close_btn.bind(on_press=popup.dismiss)
-        content.add_widget(close_btn)
-        
-        popup.open()
-
-
-class ChannelListScreen(BaseScreen):
-    """Kanal grupları listesi ekranı"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_groups = set()
+    def _on_load_error(self, error_msg):
+        self.hide_loading()
+        self.show_popup('Yükleme Hatası', error_msg, 'error')
+    
+    def show_loading(self, message):
+        content = BoxLayout(orientation='vertical', padding=dp(25), spacing=dp(20))
         
-    def on_enter(self):
-        self.clear_widgets()
-        self.selected_groups = set()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        
-        back_btn = RoundedButton(
-            text='<',
-            size_hint=(None, None),
-            size=(dp(50), dp(40)),
-            bg_color=COLORS['bg_light']
-        )
-        back_btn.bind(on_press=self.go_back)
-        top_bar.add_widget(back_btn)
-        
-        title = Label(
-            text='📺 Kanal Grupları',
-            font_size=dp(18),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        top_bar.add_widget(title)
-        
-        layout.add_widget(top_bar)
-        
-        # İstatistikler
-        app = App.get_running_app()
-        groups = getattr(app, 'groups', {})
-        channels = getattr(app, 'channels', [])
-        
-        stats_label = Label(
-            text=f'📊 {len(groups)} grup • {len(channels)} kanal',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=None,
-            height=dp(30)
-        )
-        layout.add_widget(stats_label)
-        
-        # Seçim bilgisi
-        self.selection_label = Label(
-            text='Seçilen: 0 grup',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['success']),
-            size_hint_y=None,
-            height=dp(25)
-        )
-        layout.add_widget(self.selection_label)
-        
-        # Kanal listesi
-        scroll = ScrollView()
-        self.list_layout = BoxLayout(orientation='vertical', spacing=dp(8), size_hint_y=None)
-        self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
-        
-        for group_name, group_data in sorted(groups.items()):
-            item = ChannelGroupItem(
-                group_name=group_name,
-                channel_count=len(group_data['channels']),
-                on_select=self.on_group_select
-            )
-            self.list_layout.add_widget(item)
-            
-        scroll.add_widget(self.list_layout)
-        layout.add_widget(scroll)
-        
-        # Alt butonlar
-        bottom_bar = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10))
-        
-        select_all_btn = RoundedButton(
-            text='Tümünü Seç',
-            bg_color=COLORS['primary']
-        )
-        select_all_btn.bind(on_press=self.select_all)
-        bottom_bar.add_widget(select_all_btn)
-        
-        export_btn = RoundedButton(
-            text='Dışa Aktar',
-            bg_color=COLORS['success']
-        )
-        export_btn.bind(on_press=self.export_selected)
-        bottom_bar.add_widget(export_btn)
-        
-        layout.add_widget(bottom_bar)
-        
-        self.add_widget(layout)
-        
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'manual_input'
-        
-    def on_group_select(self, group_name, selected):
-        if selected:
-            self.selected_groups.add(group_name)
-        else:
-            self.selected_groups.discard(group_name)
-            
-        self.selection_label.text = f'Seçilen: {len(self.selected_groups)} grup'
-        
-    def select_all(self, instance):
-        for child in self.list_layout.children:
-            if isinstance(child, ChannelGroupItem) and not child.selected:
-                child.toggle_selection(None)
-                
-    def export_selected(self, instance):
-        if not self.selected_groups:
-            self.show_message('Uyarı', 'Lütfen en az bir grup seçin!')
-            return
-            
-        app = App.get_running_app()
-        groups = getattr(app, 'groups', {})
-        selected_format = getattr(app, 'selected_format', 'm3u')
-        
-        selected_channels = []
-        for group_name in self.selected_groups:
-            if group_name in groups:
-                selected_channels.extend(groups[group_name]['channels'])
-                
-        content = IPTVParser.generate_m3u(selected_channels, selected_format)
-        self.save_file(content, selected_format)
-        
-    def save_file(self, content, format_type):
-        try:
-            from android.storage import primary_external_storage_path
-            download_path = os.path.join(primary_external_storage_path(), 'Download')
-        except:
-            download_path = os.path.expanduser('~')
-            
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'iptv_export_{timestamp}.{format_type}'
-        filepath = os.path.join(download_path, filename)
-        
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
-                
-            self.show_message('Başarılı! ✅', f'Dosya kaydedildi:\n{filepath}')
-        except Exception as e:
-            self.show_message('Hata', f'Kaydetme hatası: {str(e)}')
-            
-    def show_message(self, title, message):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        icon = Label(text='✅' if 'Başarılı' in title else '⚠️', font_size=dp(50))
-        content.add_widget(icon)
+        spinner_label = Label(text='⏳', font_size=dp(45))
+        content.add_widget(spinner_label)
         
         msg_label = Label(
             text=message,
             font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='center'
+            color=get_color_from_hex(COLORS['text_white'])
         )
-        msg_label.bind(size=msg_label.setter('text_size'))
         content.add_widget(msg_label)
         
-        close_btn = RoundedButton(
-            text='Tamam',
-            size_hint=(0.5, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['success'] if 'Başarılı' in title else COLORS['warning']
-        )
+        progress = ProgressBar(max=100, value=50, size_hint_y=None, height=dp(8))
+        content.add_widget(progress)
         
-        popup = Popup(
+        self._loading_popup = Popup(
             title='',
             content=content,
-            size_hint=(0.85, 0.45),
-            separator_height=0
+            size_hint=(0.75, 0.35),
+            auto_dismiss=False,
+            separator_height=0,
+            background_color=[0.1, 0.1, 0.18, 0.95]
         )
-        
-        close_btn.bind(on_press=popup.dismiss)
-        content.add_widget(close_btn)
-        
-        popup.open()
-
-
-class AutoInputScreen(BaseScreen):
-    """Otomatik mod - Toplu link giriş ekranı"""
+        self._loading_popup.open()
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.test_mode = 'quick'
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50))
-        
-        back_btn = RoundedButton(
-            text='< Geri',
-            size_hint=(None, None),
-            size=(dp(100), dp(40)),
-            bg_color=COLORS['bg_light']
-        )
-        back_btn.bind(on_press=self.go_back)
-        top_bar.add_widget(back_btn)
-        top_bar.add_widget(Label())
-        
-        layout.add_widget(top_bar)
-        
-        # Başlık
-        title = Label(
-            text='🤖 Otomatik Düzenleme',
-            font_size=dp(24),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
-            size_hint_y=None,
-            height=dp(40)
-        )
-        layout.add_widget(title)
-        
-        # Açıklama
-        desc = Label(
-            text='IPTV linklerini her satıra bir tane olacak şekilde girin.',
-            font_size=dp(13),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=None,
-            height=dp(30),
-            halign='center'
-        )
-        desc.bind(size=desc.setter('text_size'))
-        layout.add_widget(desc)
-        
-        # Link giriş alanı
-        input_card = StyledCard()
-        input_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        input_label = Label(
-            text='IPTV Linkleri (her satıra bir link)',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
-            size_hint_y=None,
-            height=dp(25)
-        )
-        input_label.bind(size=input_label.setter('text_size'))
-        
-        self.links_input = TextInput(
-            hint_text='https://example1.com/playlist.m3u\nhttps://example2.com/playlist.m3u',
-            multiline=True,
-            font_size=dp(13),
-            background_color=get_color_from_hex(COLORS['bg_medium']),
-            foreground_color=get_color_from_hex(COLORS['text_primary']),
-            cursor_color=get_color_from_hex(COLORS['primary']),
-            padding=[dp(15), dp(12)]
-        )
-        
-        input_inner.add_widget(input_label)
-        input_inner.add_widget(self.links_input)
-        input_card.add_widget(input_inner)
-        layout.add_widget(input_card)
-        
-        # Test seçenekleri
-        options_card = StyledCard(size_hint_y=None, height=dp(100))
-        options_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        options_label = Label(
-            text='Test Yöntemi',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
-            size_hint_y=None,
-            height=dp(25)
-        )
-        options_label.bind(size=options_label.setter('text_size'))
-        
-        test_buttons = BoxLayout(spacing=dp(10))
-        
-        self.quick_test_btn = RoundedButton(
-            text='⚡ Hızlı Test',
-            bg_color=COLORS['primary']
-        )
-        self.quick_test_btn.bind(on_press=lambda x: self.select_test_mode('quick'))
-        
-        self.deep_test_btn = RoundedButton(
-            text='🔍 Derin Test',
-            bg_color=COLORS['bg_light']
-        )
-        self.deep_test_btn.bind(on_press=lambda x: self.select_test_mode('deep'))
-        
-        test_buttons.add_widget(self.quick_test_btn)
-        test_buttons.add_widget(self.deep_test_btn)
-        
-        options_inner.add_widget(options_label)
-        options_inner.add_widget(test_buttons)
-        options_card.add_widget(options_inner)
-        layout.add_widget(options_card)
-        
-        # Test başlat butonu
-        start_btn = RoundedButton(
-            text='🚀 Test Başlat',
-            size_hint=(1, None),
-            height=dp(55),
-            font_size=dp(18),
-            bg_color=COLORS['success']
-        )
-        start_btn.bind(on_press=self.start_testing)
-        layout.add_widget(start_btn)
-        
-        self.add_widget(layout)
-        
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'welcome'
-        
-    def select_test_mode(self, mode):
-        self.test_mode = mode
-        if mode == 'quick':
-            self.quick_test_btn.bg_color = COLORS['primary']
-            self.deep_test_btn.bg_color = COLORS['bg_light']
-        else:
-            self.quick_test_btn.bg_color = COLORS['bg_light']
-            self.deep_test_btn.bg_color = COLORS['primary']
-        self.quick_test_btn.update_canvas()
-        self.deep_test_btn.update_canvas()
-        
-    def start_testing(self, instance):
-        links_text = self.links_input.text.strip()
-        
-        if not links_text:
-            self.show_error('Lütfen en az bir link girin!')
-            return
-            
-        links = [l.strip() for l in links_text.split('\n') if l.strip().startswith('http')]
-        
-        if not links:
-            self.show_error('Geçerli link bulunamadı!')
-            return
-            
-        app = App.get_running_app()
-        app.links_to_test = links
-        app.test_mode = self.test_mode
-        
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'testing'
-        
-    def show_error(self, message):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        error_icon = Label(text='❌', font_size=dp(50))
-        content.add_widget(error_icon)
-        
-        error_label = Label(
-            text=message,
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='center'
-        )
-        error_label.bind(size=error_label.setter('text_size'))
-        content.add_widget(error_label)
-        
-        close_btn = RoundedButton(
-            text='Tamam',
-            size_hint=(0.5, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['danger']
-        )
-        
-        popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.85, 0.4),
-            separator_height=0
-        )
-        
-        close_btn.bind(on_press=popup.dismiss)
-        content.add_widget(close_btn)
-        
-        popup.open()
-
-
-class TestingScreen(BaseScreen):
-    """Link test ekranı"""
+    def hide_loading(self):
+        if hasattr(self, '_loading_popup'):
+            self._loading_popup.dismiss()
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.testing = False
-        self.working_links = []
-        self.failed_links = []
+    def show_popup(self, title, message, popup_type='info'):
+        icons = {'info': 'ℹ️', 'success': '✅', 'error': '❌', 'warning': '⚠️'}
+        colors = {'info': COLORS['primary'], 'success': COLORS['success'], 
+                  'error': COLORS['danger'], 'warning': COLORS['warning']}
         
-    def on_enter(self):
-        self.clear_widgets()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        Clock.schedule_once(lambda dt: self.start_tests(), 0.2)
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
         
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        # Başlık
-        title = Label(
-            text='🔍 Test Ediliyor...',
-            font_size=dp(24),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
-            size_hint_y=None,
-            height=dp(50)
-        )
-        layout.add_widget(title)
-        
-        # İlerleme
-        progress_card = StyledCard(size_hint_y=None, height=dp(150))
-        progress_inner = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(10))
-        
-        self.progress_label = Label(
-            text='Hazırlanıyor...',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        progress_inner.add_widget(self.progress_label)
-        
-        self.progress_bar = ProgressBar(max=100, value=0)
-        progress_inner.add_widget(self.progress_bar)
-        
-        self.stats_label = Label(
-            text='✅ 0 Çalışan  •  ❌ 0 Başarısız',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        progress_inner.add_widget(self.stats_label)
-        
-        progress_card.add_widget(progress_inner)
-        layout.add_widget(progress_card)
-        
-        # Canlı log
-        log_card = StyledCard()
-        log_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        log_title = Label(
-            text='📋 Test Günlüğü',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='left',
-            size_hint_y=None,
-            height=dp(25)
-        )
-        log_title.bind(size=log_title.setter('text_size'))
-        log_inner.add_widget(log_title)
-        
-        scroll = ScrollView()
-        self.log_layout = BoxLayout(orientation='vertical', spacing=dp(5), size_hint_y=None)
-        self.log_layout.bind(minimum_height=self.log_layout.setter('height'))
-        scroll.add_widget(self.log_layout)
-        log_inner.add_widget(scroll)
-        
-        log_card.add_widget(log_inner)
-        layout.add_widget(log_card)
-        
-        # İptal butonu
-        self.cancel_btn = RoundedButton(
-            text='❌ İptal Et',
-            size_hint=(1, None),
-            height=dp(50),
-            bg_color=COLORS['danger']
-        )
-        self.cancel_btn.bind(on_press=self.cancel_tests)
-        layout.add_widget(self.cancel_btn)
-        
-        self.add_widget(layout)
-        
-    def start_tests(self):
-        self.testing = True
-        self.working_links = []
-        self.failed_links = []
-        
-        app = App.get_running_app()
-        self.links = getattr(app, 'links_to_test', [])
-        self.test_mode = getattr(app, 'test_mode', 'quick')
-        self.total = len(self.links)
-        self.current = 0
-        
-        threading.Thread(target=self._run_tests, daemon=True).start()
-        
-    def _run_tests(self):
-        for i, link in enumerate(self.links):
-            if not self.testing:
-                break
-                
-            self.current = i + 1
-            
-            Clock.schedule_once(lambda dt, l=link: self.add_log(f'Test ediliyor: {l[:50]}...', 'info'))
-            
-            if self.test_mode == 'quick':
-                success, message = IPTVTester.test_link(link)
-            else:
-                success, message = IPTVTester.test_stream(link)
-                
-            if success:
-                self.working_links.append(link)
-                Clock.schedule_once(lambda dt, l=link: self.add_log(f'✅ Çalışıyor: {l[:40]}...', 'success'))
-            else:
-                self.failed_links.append({'link': link, 'reason': message})
-                Clock.schedule_once(lambda dt, l=link, m=message: self.add_log(f'❌ Başarısız: {l[:30]}... ({m})', 'error'))
-                
-            Clock.schedule_once(self.update_progress)
-            
-        Clock.schedule_once(self.tests_completed)
-        
-    def update_progress(self, dt):
-        if self.total > 0:
-            progress = (self.current / self.total) * 100
-            self.progress_bar.value = progress
-            self.progress_label.text = f'Test ediliyor: {self.current}/{self.total}'
-            self.stats_label.text = f'✅ {len(self.working_links)} Çalışan  •  ❌ {len(self.failed_links)} Başarısız'
-            
-    def add_log(self, message, log_type='info'):
-        colors = {
-            'info': COLORS['text_secondary'],
-            'success': COLORS['success'],
-            'error': COLORS['danger']
-        }
-        
-        log_item = Label(
-            text=message,
-            font_size=dp(12),
-            color=get_color_from_hex(colors.get(log_type, COLORS['text_secondary'])),
-            size_hint_y=None,
-            height=dp(25),
-            halign='left'
-        )
-        log_item.bind(size=log_item.setter('text_size'))
-        self.log_layout.add_widget(log_item)
-        
-    def tests_completed(self, dt):
-        self.testing = False
-        self.progress_label.text = 'Test tamamlandı!'
-        self.cancel_btn.text = 'Devam Et'
-        self.cancel_btn.bg_color = COLORS['success']
-        self.cancel_btn.update_canvas()
-        self.cancel_btn.unbind(on_press=self.cancel_tests)
-        self.cancel_btn.bind(on_press=self.go_next)
-        
-        app = App.get_running_app()
-        app.working_links = self.working_links
-        app.failed_links = self.failed_links
-        
-    def cancel_tests(self, instance):
-        self.testing = False
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'auto_input'
-        
-    def go_next(self, instance):
-        if not self.working_links:
-            self.show_no_working_links()
-            return
-            
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'auto_result'
-        
-    def show_no_working_links(self):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        icon = Label(text='😞', font_size=dp(50))
+        icon = Label(text=icons.get(popup_type, 'ℹ️'), font_size=dp(45))
         content.add_widget(icon)
         
         msg = Label(
-            text='Çalışan link bulunamadı!\nLütfen farklı linkler deneyin.',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='center'
-        )
-        msg.bind(size=msg.setter('text_size'))
-        content.add_widget(msg)
-        
-        close_btn = RoundedButton(
-            text='Geri Dön',
-            size_hint=(0.5, None),
-            height=dp(45),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['primary']
-        )
-        
-        popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.85, 0.4),
-            separator_height=0
-        )
-        
-        def go_back(x):
-            popup.dismiss()
-            self.manager.transition = SlideTransition(direction='right')
-            self.manager.current = 'auto_input'
-            
-        close_btn.bind(on_press=go_back)
-        content.add_widget(close_btn)
-        
-        popup.open()
-
-
-class AutoResultScreen(BaseScreen):
-    """Otomatik test sonuç ekranı"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-    def on_enter(self):
-        self.clear_widgets()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        app = App.get_running_app()
-        working = len(getattr(app, 'working_links', []))
-        failed = len(getattr(app, 'failed_links', []))
-        
-        # Başlık
-        title = Label(
-            text='🎉 Test Tamamlandı!',
-            font_size=dp(24),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
-            size_hint_y=None,
-            height=dp(50)
-        )
-        layout.add_widget(title)
-        
-        # Sonuç kartı
-        result_card = StyledCard(size_hint_y=None, height=dp(120))
-        result_inner = BoxLayout(orientation='horizontal', spacing=dp(20))
-        
-        # Çalışan
-        working_box = BoxLayout(orientation='vertical')
-        working_icon = Label(text='✅', font_size=dp(40))
-        working_count = Label(
-            text=str(working),
-            font_size=dp(32),
-            bold=True,
-            color=get_color_from_hex(COLORS['success'])
-        )
-        working_label = Label(
-            text='Çalışan',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        working_box.add_widget(working_icon)
-        working_box.add_widget(working_count)
-        working_box.add_widget(working_label)
-        result_inner.add_widget(working_box)
-        
-        # Başarısız
-        failed_box = BoxLayout(orientation='vertical')
-        failed_icon = Label(text='❌', font_size=dp(40))
-        failed_count = Label(
-            text=str(failed),
-            font_size=dp(32),
-            bold=True,
-            color=get_color_from_hex(COLORS['danger'])
-        )
-        failed_label = Label(
-            text='Başarısız',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        failed_box.add_widget(failed_icon)
-        failed_box.add_widget(failed_count)
-        failed_box.add_widget(failed_label)
-        result_inner.add_widget(failed_box)
-        
-        result_card.add_widget(result_inner)
-        layout.add_widget(result_card)
-        
-        # Soru
-        question = Label(
-            text='Çalışan linkleri nasıl düzenlemek istersiniz?',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_primary']),
-            size_hint_y=None,
-            height=dp(40)
-        )
-        layout.add_widget(question)
-        
-        # Otomatik düzenleme kartı
-        auto_card = StyledCard(size_hint_y=None, height=dp(140))
-        auto_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        auto_header = BoxLayout(size_hint_y=None, height=dp(40))
-        auto_icon = Label(text='🤖', font_size=dp(30), size_hint_x=None, width=dp(50))
-        auto_title = Label(
-            text='Otomatik Düzenleme',
-            font_size=dp(18),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='left'
-        )
-        auto_title.bind(size=auto_title.setter('text_size'))
-        auto_header.add_widget(auto_icon)
-        auto_header.add_widget(auto_title)
-        
-        auto_desc = Label(
-            text='Ülke seçin, kanallar otomatik filtrelensin',
-            font_size=dp(13),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='center'
-        )
-        auto_desc.bind(size=auto_desc.setter('text_size'))
-        
-        auto_btn = RoundedButton(
-            text='Otomatik',
-            size_hint=(0.6, None),
-            height=dp(40),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['primary']
-        )
-        auto_btn.bind(on_press=self.go_auto_edit)
-        
-        auto_inner.add_widget(auto_header)
-        auto_inner.add_widget(auto_desc)
-        auto_inner.add_widget(auto_btn)
-        auto_card.add_widget(auto_inner)
-        layout.add_widget(auto_card)
-        
-        # Manuel düzenleme kartı
-        manual_card = StyledCard(size_hint_y=None, height=dp(140))
-        manual_inner = BoxLayout(orientation='vertical', spacing=dp(10))
-        
-        manual_header = BoxLayout(size_hint_y=None, height=dp(40))
-        manual_icon = Label(text='✏️', font_size=dp(30), size_hint_x=None, width=dp(50))
-        manual_title = Label(
-            text='Manuel Düzenleme',
-            font_size=dp(18),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
-            halign='left'
-        )
-        manual_title.bind(size=manual_title.setter('text_size'))
-        manual_header.add_widget(manual_icon)
-        manual_header.add_widget(manual_title)
-        
-        manual_desc = Label(
-            text='Her linki tek tek düzenleyin',
-            font_size=dp(13),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            halign='center'
-        )
-        manual_desc.bind(size=manual_desc.setter('text_size'))
-        
-        manual_btn = RoundedButton(
-            text='Manuel',
-            size_hint=(0.6, None),
-            height=dp(40),
-            pos_hint={'center_x': 0.5},
-            bg_color=COLORS['secondary']
-        )
-        manual_btn.bind(on_press=self.go_manual_edit)
-        
-        manual_inner.add_widget(manual_header)
-        manual_inner.add_widget(manual_desc)
-        manual_inner.add_widget(manual_btn)
-        manual_card.add_widget(manual_inner)
-        layout.add_widget(manual_card)
-        
-        # Spacer
-        layout.add_widget(Label())
-        
-        # Geri butonu
-        back_btn = RoundedButton(
-            text='< Geri',
-            size_hint=(1, None),
-            height=dp(45),
-            bg_color=COLORS['bg_light']
-        )
-        back_btn.bind(on_press=self.go_back)
-        layout.add_widget(back_btn)
-        
-        self.add_widget(layout)
-        
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'auto_input'
-        
-    def go_auto_edit(self, instance):
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'country_select'
-        
-    def go_manual_edit(self, instance):
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'manual_edit_list'
-
-
-class CountrySelectScreen(BaseScreen):
-    """Ülke seçim ekranı"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_countries = set()
-        
-    def on_enter(self):
-        self.clear_widgets()
-        self.selected_countries = set()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
-    def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50))
-        
-        back_btn = RoundedButton(
-            text='<',
-            size_hint=(None, None),
-            size=(dp(50), dp(40)),
-            bg_color=COLORS['bg_light']
-        )
-        back_btn.bind(on_press=self.go_back)
-        top_bar.add_widget(back_btn)
-        
-        title = Label(
-            text='🌍 Ülke Seçimi',
-            font_size=dp(20),
-            bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
-        )
-        top_bar.add_widget(title)
-        
-        layout.add_widget(top_bar)
-        
-        # Açıklama
-        desc = Label(
-            text='Hangi ülkelerin kanallarını istiyorsunuz?',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=None,
-            height=dp(30)
-        )
-        layout.add_widget(desc)
-        
-        # Seçim bilgisi
-        self.selection_label = Label(
-            text='Seçilen: 0 ülke',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['success']),
-            size_hint_y=None,
-            height=dp(25)
-        )
-        layout.add_widget(self.selection_label)
-        
-        # Ülke listesi
-        scroll = ScrollView()
-        self.country_layout = GridLayout(cols=2, spacing=dp(10), size_hint_y=None, padding=dp(5))
-        self.country_layout.bind(minimum_height=self.country_layout.setter('height'))
-        
-        featured = ['turkey', 'germany', 'romania', 'austria']
-        
-        self.country_buttons = {}
-        
-        for country in featured:
-            btn = self._create_country_button(country, featured=True)
-            self.country_layout.add_widget(btn)
-            
-        for country in sorted(COUNTRY_FLAGS.keys()):
-            if country not in featured:
-                btn = self._create_country_button(country)
-                self.country_layout.add_widget(btn)
-                
-        scroll.add_widget(self.country_layout)
-        layout.add_widget(scroll)
-        
-        # Format seçimi
-        format_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        
-        format_label = Label(
-            text='Format:',
-            size_hint_x=None,
-            width=dp(60),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        format_layout.add_widget(format_label)
-        
-        self.format_spinner = Spinner(
-            text='M3U',
-            values=('M3U', 'M3U8', 'TXT'),
-            size_hint_x=None,
-            width=dp(120)
-        )
-        format_layout.add_widget(self.format_spinner)
-        format_layout.add_widget(Label())
-        
-        layout.add_widget(format_layout)
-        
-        # İşle butonu
-        process_btn = RoundedButton(
-            text='🚀 Oluştur',
-            size_hint=(1, None),
-            height=dp(55),
-            font_size=dp(18),
-            bg_color=COLORS['success']
-        )
-        process_btn.bind(on_press=self.process_links)
-        layout.add_widget(process_btn)
-        
-        self.add_widget(layout)
-        
-    def _create_country_button(self, country, featured=False):
-        btn = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(80))
-        
-        flag = COUNTRY_FLAGS.get(country, '🏳️')
-        name = country.replace('_', ' ').title()
-        
-        inner_btn = RoundedButton(
-            text=f'{flag}\n{name}',
-            bg_color=COLORS['warning'] if featured else COLORS['card_bg'],
-            halign='center'
-        )
-        inner_btn.country = country
-        inner_btn.bind(on_press=self.toggle_country)
-        
-        self.country_buttons[country] = inner_btn
-        btn.add_widget(inner_btn)
-        
-        if featured:
-            star = Label(
-                text='⭐ Önerilen',
-                font_size=dp(10),
-                color=get_color_from_hex(COLORS['warning']),
-                size_hint_y=None,
-                height=dp(15)
-            )
-            btn.add_widget(star)
-            
-        return btn
-        
-    def toggle_country(self, instance):
-        country = instance.country
-        
-        if country in self.selected_countries:
-            self.selected_countries.remove(country)
-            instance.bg_color = COLORS['card_bg']
-        else:
-            self.selected_countries.add(country)
-            instance.bg_color = COLORS['success']
-            
-        instance.update_canvas()
-        self.selection_label.text = f'Seçilen: {len(self.selected_countries)} ülke'
-        
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'auto_result'
-        
-    def process_links(self, instance):
-        if not self.selected_countries:
-            self.show_error('Lütfen en az bir ülke seçin!')
-            return
-            
-        app = App.get_running_app()
-        app.selected_countries = self.selected_countries
-        app.output_format = self.format_spinner.text.lower()
-        
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'processing'
-        
-    def show_error(self, message):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        icon = Label(text='⚠️', font_size=dp(50))
-        content.add_widget(icon)
-        
-        label = Label(
             text=message,
             font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
+            color=get_color_from_hex(COLORS['text_white']),
             halign='center'
         )
-        label.bind(size=label.setter('text_size'))
-        content.add_widget(label)
+        msg.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        content.add_widget(msg)
         
-        btn = RoundedButton(
+        btn = Button(
             text='Tamam',
             size_hint=(0.5, None),
-            height=dp(45),
+            height=dp(42),
             pos_hint={'center_x': 0.5},
-            bg_color=COLORS['warning']
+            background_normal='',
+            background_color=get_color_from_hex(colors.get(popup_type, COLORS['primary']))
         )
         
         popup = Popup(
             title='',
             content=content,
-            size_hint=(0.8, 0.35),
+            size_hint=(0.8, 0.4),
             separator_height=0
         )
         
         btn.bind(on_press=popup.dismiss)
         content.add_widget(btn)
         popup.open()
-
-
-class ProcessingScreen(BaseScreen):
-    """İşleme ekranı"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
+    def go_back(self):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'welcome'
+
+
+class ChannelListScreen(Screen):
+    """Kanal grupları listesi"""
+    
     def on_enter(self):
         self.clear_widgets()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        Clock.schedule_once(lambda dt: self.start_processing(), 0.2)
-        
+        self.selected_groups = set()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
     def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        app = App.get_running_app()
+        groups = getattr(app, 'groups', {})
+        channels = getattr(app, 'channels', [])
         
-        # Başlık
+        root = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12))
+        
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
+            size_hint=(None, None),
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        back_btn.bind(on_press=lambda x: self.go_back())
+        top_bar.add_widget(back_btn)
+        
+        title = Label(
+            text='📺 Kanal Grupları',
+            font_size=dp(17),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white'])
+        )
+        top_bar.add_widget(title)
+        
+        root.add_widget(top_bar)
+        
+        # Stats
+        stats_label = Label(
+            text=f'📊 {len(groups)} grup • {len(channels)} kanal',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(25)
+        )
+        root.add_widget(stats_label)
+        
+        # Selection info
+        self.selection_label = Label(
+            text='✓ Seçilen: 0 grup (0 kanal)',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['success']),
+            size_hint_y=None,
+            height=dp(22)
+        )
+        root.add_widget(self.selection_label)
+        
+        # Channel list
+        scroll = ScrollView()
+        self.list_layout = BoxLayout(orientation='vertical', spacing=dp(8), size_hint_y=None)
+        self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
+        
+        self.group_cards = {}
+        for group_name, group_data in sorted(groups.items()):
+            card = ChannelGroupCard(on_select_callback=self.on_group_select)
+            card.group_name = group_name
+            card.channel_count = len(group_data['channels'])
+            card.logo_url = group_data.get('logo', '')
+            self.group_cards[group_name] = card
+            self.list_layout.add_widget(card)
+        
+        scroll.add_widget(self.list_layout)
+        root.add_widget(scroll)
+        
+        # Bottom buttons
+        bottom_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        
+        select_all_btn = Button(
+            text='Tümünü Seç',
+            font_size=dp(14),
+            bold=True,
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
+        )
+        select_all_btn.bind(on_press=self.select_all)
+        bottom_bar.add_widget(select_all_btn)
+        
+        export_btn = Button(
+            text='📤 Dışa Aktar',
+            font_size=dp(14),
+            bold=True,
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['success'])
+        )
+        export_btn.bind(on_press=self.export_selected)
+        bottom_bar.add_widget(export_btn)
+        
+        root.add_widget(bottom_bar)
+        self.add_widget(root)
+    
+    def on_group_select(self, group_name, selected):
+        app = App.get_running_app()
+        groups = getattr(app, 'groups', {})
+        
+        if selected:
+            self.selected_groups.add(group_name)
+        else:
+            self.selected_groups.discard(group_name)
+        
+        # Count selected channels
+        total_channels = sum(len(groups[g]['channels']) for g in self.selected_groups if g in groups)
+        self.selection_label.text = f'✓ Seçilen: {len(self.selected_groups)} grup ({total_channels} kanal)'
+    
+    def select_all(self, instance):
+        app = App.get_running_app()
+        groups = getattr(app, 'groups', {})
+        
+        for group_name, card in self.group_cards.items():
+            if not card.selected:
+                card.selected = True
+                self.selected_groups.add(group_name)
+        
+        total_channels = sum(len(groups[g]['channels']) for g in self.selected_groups if g in groups)
+        self.selection_label.text = f'✓ Seçilen: {len(self.selected_groups)} grup ({total_channels} kanal)'
+    
+    def export_selected(self, instance):
+        if not self.selected_groups:
+            self.show_popup('Uyarı', 'Lütfen en az bir grup seçin!', 'warning')
+            return
+        
+        app = App.get_running_app()
+        groups = getattr(app, 'groups', {})
+        selected_format = getattr(app, 'selected_format', 'm3u8')
+        
+        # Collect selected channels
+        selected_channels = []
+        for group_name in self.selected_groups:
+            if group_name in groups:
+                selected_channels.extend(groups[group_name]['channels'])
+        
+        # Generate content
+        if selected_format == 'txt':
+            content = generate_txt(selected_channels)
+            ext = '.txt'
+        else:
+            content = generate_m3u(selected_channels, selected_format)
+            ext = FILE_FORMATS.get(selected_format, {}).get('ext', '.m3u')
+        
+        # Save file
+        download_path = get_download_path()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'iptv_export_{timestamp}{ext}'
+        filepath = os.path.join(download_path, filename)
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            self.show_popup(
+                'Başarılı! ✅',
+                f'{len(selected_channels)} kanal kaydedildi!\n\n📁 {filename}\n📂 Download klasörü',
+                'success'
+            )
+        except Exception as e:
+            self.show_popup('Hata', f'Kaydetme hatası: {str(e)[:50]}', 'error')
+    
+    def show_popup(self, title, message, popup_type='info'):
+        icons = {'success': '✅', 'error': '❌', 'warning': '⚠️'}
+        colors = {'success': COLORS['success'], 'error': COLORS['danger'], 'warning': COLORS['warning']}
+        
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        icon = Label(text=icons.get(popup_type, '✅'), font_size=dp(45))
+        content.add_widget(icon)
+        
+        msg = Label(
+            text=message,
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_white']),
+            halign='center'
+        )
+        msg.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        content.add_widget(msg)
+        
+        btn = Button(
+            text='Tamam',
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(colors.get(popup_type, COLORS['success']))
+        )
+        
+        popup = Popup(title='', content=content, size_hint=(0.85, 0.45), separator_height=0)
+        btn.bind(on_press=popup.dismiss)
+        content.add_widget(btn)
+        popup.open()
+    
+    def go_back(self):
+        app = App.get_running_app()
+        source = getattr(app, 'source_mode', 'manual')
+        
+        self.manager.transition = SlideTransition(direction='right')
+        if source == 'manual':
+            self.manager.current = 'manual_input'
+        else:
+            self.manager.current = 'auto_result'
+
+
+class AutoInputScreen(Screen):
+    """Otomatik mod - Toplu link giriş"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        self.test_mode = 'deep'
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
+    def build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(15))
+        
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
+            size_hint=(None, None),
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        back_btn.bind(on_press=lambda x: self.go_back())
+        top_bar.add_widget(back_btn)
+        
+        title = Label(
+            text='🤖 Otomatik Düzenleme',
+            font_size=dp(18),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white'])
+        )
+        top_bar.add_widget(title)
+        
+        root.add_widget(top_bar)
+        
+        # Description
+        desc = Label(
+            text='IPTV linklerini her satıra bir tane olacak şekilde girin.\nTüm linkler sırayla test edilecek.',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(38),
+            halign='center'
+        )
+        desc.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        root.add_widget(desc)
+        
+        # Links input
+        input_card = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        input_card.bind(size=self._update_card, pos=self._update_card)
+        self._input_card = input_card
+        
+        input_label = Label(
+            text='IPTV Linkleri (her satıra bir link)',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(20),
+            halign='left'
+        )
+        input_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        input_card.add_widget(input_label)
+        
+        self.links_input = TextInput(
+            hint_text='https://example1.com/playlist.m3u\nhttps://example2.com/playlist.m3u\nhttps://example3.com/playlist.m3u',
+            multiline=True,
+            font_size=dp(12),
+            background_color=get_color_from_hex(COLORS['bg_medium']),
+            foreground_color=get_color_from_hex(COLORS['text_white']),
+            cursor_color=get_color_from_hex(COLORS['primary']),
+            padding=[dp(12), dp(10)]
+        )
+        input_card.add_widget(self.links_input)
+        
+        root.add_widget(input_card)
+        
+        # Test mode selection
+        mode_card = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10), size_hint_y=None, height=dp(105))
+        mode_card.bind(size=self._update_card, pos=self._update_card)
+        self._mode_card = mode_card
+        
+        mode_label = Label(
+            text='Test Yöntemi',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(20),
+            halign='left'
+        )
+        mode_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        mode_card.add_widget(mode_label)
+        
+        mode_btns = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(48))
+        
+        self.quick_btn = ToggleButton(
+            text='⚡ Hızlı Test\nSadece bağlantı',
+            group='test_mode',
+            state='normal',
+            font_size=dp(11),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        self.quick_btn.bind(on_press=lambda x: self.set_test_mode('quick'))
+        mode_btns.add_widget(self.quick_btn)
+        
+        self.deep_btn = ToggleButton(
+            text='🔍 Derin Test ⭐\nVideo akışı kontrolü',
+            group='test_mode',
+            state='down',
+            font_size=dp(11),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
+        )
+        self.deep_btn.bind(on_press=lambda x: self.set_test_mode('deep'))
+        mode_btns.add_widget(self.deep_btn)
+        
+        mode_card.add_widget(mode_btns)
+        root.add_widget(mode_card)
+        
+        # Start button
+        start_btn = Button(
+            text='🚀 Test Başlat',
+            font_size=dp(16),
+            bold=True,
+            size_hint_y=None,
+            height=dp(52),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['success'])
+        )
+        start_btn.bind(on_press=self.start_testing)
+        root.add_widget(start_btn)
+        
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_cards(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_single_card(widget), 0)
+    
+    def _draw_cards(self):
+        self._draw_single_card(self._input_card)
+        self._draw_single_card(self._mode_card)
+    
+    def _draw_single_card(self, card):
+        from kivy.graphics import Color, RoundedRectangle
+        card.canvas.before.clear()
+        with card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+    
+    def set_test_mode(self, mode):
+        self.test_mode = mode
+        if mode == 'quick':
+            self.quick_btn.background_color = get_color_from_hex(COLORS['primary'])
+            self.deep_btn.background_color = get_color_from_hex(COLORS['bg_card'])
+        else:
+            self.quick_btn.background_color = get_color_from_hex(COLORS['bg_card'])
+            self.deep_btn.background_color = get_color_from_hex(COLORS['primary'])
+    
+    def start_testing(self, instance):
+        links_text = self.links_input.text.strip()
+        
+        if not links_text:
+            self.show_popup('Hata', 'Lütfen en az bir link girin!', 'error')
+            return
+        
+        # Parse links
+        links = []
+        for line in links_text.split('\n'):
+            line = line.strip()
+            if line.startswith('http'):
+                links.append(line)
+        
+        if not links:
+            self.show_popup('Hata', 'Geçerli link bulunamadı!\nLinkler http veya https ile başlamalı.', 'error')
+            return
+        
+        app = App.get_running_app()
+        app.links_to_test = links
+        app.test_mode = self.test_mode
+        
+        self.manager.current = 'testing'
+    
+    def show_popup(self, title, message, popup_type='info'):
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        icon = Label(text='❌' if popup_type == 'error' else 'ℹ️', font_size=dp(45))
+        content.add_widget(icon)
+        
+        msg = Label(
+            text=message,
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_white']),
+            halign='center'
+        )
+        msg.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        content.add_widget(msg)
+        
+        btn = Button(
+            text='Tamam',
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['danger'])
+        )
+        
+        popup = Popup(title='', content=content, size_hint=(0.8, 0.4), separator_height=0)
+        btn.bind(on_press=popup.dismiss)
+        content.add_widget(btn)
+        popup.open()
+    
+    def go_back(self):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'welcome'
+
+
+class TestingScreen(Screen):
+    """Link test ekranı"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        self.testing = True
+        self.working_links = []
+        self.failed_links = []
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+        Clock.schedule_once(lambda dt: self.start_tests(), 0.2)
+    
+    def build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(15))
+        
+        # Title
+        title = Label(
+            text='🔍 Linkler Test Ediliyor...',
+            font_size=dp(20),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(45)
+        )
+        root.add_widget(title)
+        
+        # Progress card
+        progress_card = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12), size_hint_y=None, height=dp(130))
+        progress_card.bind(size=self._update_card, pos=self._update_card)
+        self._progress_card = progress_card
+        
+        self.progress_label = Label(
+            text='Hazırlanıyor...',
+            font_size=dp(15),
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(25)
+        )
+        progress_card.add_widget(self.progress_label)
+        
+        self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height=dp(12))
+        progress_card.add_widget(self.progress_bar)
+        
+        self.stats_label = Label(
+            text='✅ 0 Çalışan  •  ❌ 0 Başarısız',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(25)
+        )
+        progress_card.add_widget(self.stats_label)
+        
+        root.add_widget(progress_card)
+        
+        # Log area
+        log_card = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
+        log_card.bind(size=self._update_card, pos=self._update_card)
+        self._log_card = log_card
+        
+        log_title = Label(
+            text='📋 Test Günlüğü',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(22),
+            halign='left'
+        )
+        log_title.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        log_card.add_widget(log_title)
+        
+        scroll = ScrollView()
+        self.log_layout = BoxLayout(orientation='vertical', spacing=dp(4), size_hint_y=None)
+        self.log_layout.bind(minimum_height=self.log_layout.setter('height'))
+        scroll.add_widget(self.log_layout)
+        log_card.add_widget(scroll)
+        
+        root.add_widget(log_card)
+        
+        # Cancel button
+        self.action_btn = Button(
+            text='❌ İptal Et',
+            font_size=dp(15),
+            bold=True,
+            size_hint_y=None,
+            height=dp(48),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['danger'])
+        )
+        self.action_btn.bind(on_press=self.on_action)
+        root.add_widget(self.action_btn)
+        
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_cards(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_single_card(widget), 0)
+    
+    def _draw_cards(self):
+        self._draw_single_card(self._progress_card)
+        self._draw_single_card(self._log_card)
+    
+    def _draw_single_card(self, card):
+        from kivy.graphics import Color, RoundedRectangle
+        card.canvas.before.clear()
+        with card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+    
+    def start_tests(self):
+        threading.Thread(target=self._run_tests, daemon=True).start()
+    
+    def _run_tests(self):
+        app = App.get_running_app()
+        links = getattr(app, 'links_to_test', [])
+        test_mode = getattr(app, 'test_mode', 'deep')
+        
+        total = len(links)
+        
+        for i, link in enumerate(links):
+            if not self.testing:
+                break
+            
+            # Log testing
+            domain = urlparse(link).netloc or link[:30]
+            Clock.schedule_once(lambda dt, d=domain: self.add_log(f'⏳ Test ediliyor: {d}', 'testing'))
+            
+            # Test link
+            if test_mode == 'quick':
+                success, message = test_link_quick(link)
+            else:
+                success, message = test_link_deep(link)
+            
+            if success:
+                self.working_links.append(link)
+                Clock.schedule_once(lambda dt, d=domain: self.add_log(f'✅ Çalışıyor: {d}', 'success'))
+            else:
+                self.failed_links.append({'link': link, 'reason': message})
+                Clock.schedule_once(lambda dt, d=domain, m=message: self.add_log(f'❌ Başarısız: {d} ({m})', 'error'))
+            
+            # Update progress
+            progress = ((i + 1) / total) * 100
+            Clock.schedule_once(lambda dt, p=progress, c=i+1, t=total: self.update_progress(p, c, t))
+        
+        Clock.schedule_once(lambda dt: self.tests_complete())
+    
+    def add_log(self, text, log_type):
+        colors = {
+            'testing': COLORS['text_gray'],
+            'success': COLORS['success'],
+            'error': COLORS['danger']
+        }
+        
+        log_item = Label(
+            text=text,
+            font_size=dp(11),
+            color=get_color_from_hex(colors.get(log_type, COLORS['text_gray'])),
+            size_hint_y=None,
+            height=dp(22),
+            halign='left'
+        )
+        log_item.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        self.log_layout.add_widget(log_item)
+    
+    def update_progress(self, progress, current, total):
+        self.progress_bar.value = progress
+        self.progress_label.text = f'Test ediliyor: {current}/{total}'
+        self.stats_label.text = f'✅ {len(self.working_links)} Çalışan  •  ❌ {len(self.failed_links)} Başarısız'
+    
+    def tests_complete(self):
+        self.testing = False
+        self.progress_label.text = '✅ Test tamamlandı!'
+        self.action_btn.text = '➡️ Devam Et'
+        self.action_btn.background_color = get_color_from_hex(COLORS['success'])
+        
+        app = App.get_running_app()
+        app.working_links = self.working_links
+        app.failed_links = self.failed_links
+    
+    def on_action(self, instance):
+        if self.action_btn.text == '❌ İptal Et':
+            self.testing = False
+            self.manager.transition = SlideTransition(direction='right')
+            self.manager.current = 'auto_input'
+        else:
+            if not self.working_links:
+                self.show_no_links_popup()
+            else:
+                self.manager.current = 'auto_result'
+    
+    def show_no_links_popup(self):
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        icon = Label(text='😞', font_size=dp(50))
+        content.add_widget(icon)
+        
+        msg = Label(
+            text='Çalışan link bulunamadı!\n\nLütfen farklı linkler deneyin.',
+            font_size=dp(14),
+            color=get_color_from_hex(COLORS['text_white']),
+            halign='center'
+        )
+        msg.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        content.add_widget(msg)
+        
+        btn = Button(
+            text='Geri Dön',
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
+        )
+        
+        popup = Popup(title='', content=content, size_hint=(0.8, 0.4), separator_height=0)
+        
+        def go_back(x):
+            popup.dismiss()
+            self.manager.transition = SlideTransition(direction='right')
+            self.manager.current = 'auto_input'
+        
+        btn.bind(on_press=go_back)
+        content.add_widget(btn)
+        popup.open()
+
+
+class AutoResultScreen(Screen):
+    """Test sonuçları - Düzenleme modu seçimi"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
+    def build_ui(self):
+        app = App.get_running_app()
+        working = len(getattr(app, 'working_links', []))
+        failed = len(getattr(app, 'failed_links', []))
+        
+        root = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(18))
+        
+        # Title
+        title = Label(
+            text='🎉 Test Tamamlandı!',
+            font_size=dp(22),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(45)
+        )
+        root.add_widget(title)
+        
+        # Results card
+        result_card = BoxLayout(orientation='horizontal', padding=dp(20), spacing=dp(20), size_hint_y=None, height=dp(110))
+        result_card.bind(size=self._update_card, pos=self._update_card)
+        self._result_card = result_card
+        
+        # Working count
+        working_box = BoxLayout(orientation='vertical')
+        working_box.add_widget(Label(text='✅', font_size=dp(35)))
+        working_box.add_widget(Label(text=str(working), font_size=dp(28), bold=True, 
+                                     color=get_color_from_hex(COLORS['success'])))
+        working_box.add_widget(Label(text='Çalışan', font_size=dp(12), 
+                                     color=get_color_from_hex(COLORS['text_gray'])))
+        result_card.add_widget(working_box)
+        
+        # Failed count
+        failed_box = BoxLayout(orientation='vertical')
+        failed_box.add_widget(Label(text='❌', font_size=dp(35)))
+        failed_box.add_widget(Label(text=str(failed), font_size=dp(28), bold=True,
+                                    color=get_color_from_hex(COLORS['danger'])))
+        failed_box.add_widget(Label(text='Başarısız', font_size=dp(12),
+                                    color=get_color_from_hex(COLORS['text_gray'])))
+        result_card.add_widget(failed_box)
+        
+        root.add_widget(result_card)
+        
+        # Question
+        question = Label(
+            text='Çalışan linkleri nasıl düzenlemek istersiniz?',
+            font_size=dp(15),
+            color=get_color_from_hex(COLORS['text_white']),
+            size_hint_y=None,
+            height=dp(35)
+        )
+        root.add_widget(question)
+        
+        # Option cards
+        options = BoxLayout(orientation='vertical', spacing=dp(12))
+        
+        # Auto option
+        auto_card = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(10), size_hint_y=None, height=dp(130))
+        auto_card.bind(size=self._update_card, pos=self._update_card)
+        self._auto_card = auto_card
+        
+        auto_header = BoxLayout(size_hint_y=None, height=dp(35))
+        auto_header.add_widget(Label(text='🤖', font_size=dp(28), size_hint_x=None, width=dp(45)))
+        auto_header.add_widget(Label(text='Otomatik Düzenleme', font_size=dp(16), bold=True,
+                                     color=get_color_from_hex(COLORS['text_white']), halign='left'))
+        auto_card.add_widget(auto_header)
+        
+        auto_desc = Label(
+            text='Ülke seçin, kanallar otomatik filtrelensin ve birleştirilsin',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(22)
+        )
+        auto_card.add_widget(auto_desc)
+        
+        auto_btn = Button(
+            text='Otomatik Düzenle',
+            size_hint=(0.7, None),
+            height=dp(40),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
+        )
+        auto_btn.bind(on_press=lambda x: self.go_auto())
+        auto_card.add_widget(auto_btn)
+        options.add_widget(auto_card)
+        
+        # Manual option
+        manual_card = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(10), size_hint_y=None, height=dp(130))
+        manual_card.bind(size=self._update_card, pos=self._update_card)
+        self._manual_card = manual_card
+        
+        manual_header = BoxLayout(size_hint_y=None, height=dp(35))
+        manual_header.add_widget(Label(text='✏️', font_size=dp(28), size_hint_x=None, width=dp(45)))
+        manual_header.add_widget(Label(text='Manuel Düzenleme', font_size=dp(16), bold=True,
+                                       color=get_color_from_hex(COLORS['text_white']), halign='left'))
+        manual_card.add_widget(manual_header)
+        
+        manual_desc = Label(
+            text='Her linki tek tek düzenleyin, istediğiniz kanalları seçin',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(22)
+        )
+        manual_card.add_widget(manual_desc)
+        
+        manual_btn = Button(
+            text='Manuel Düzenle',
+            size_hint=(0.7, None),
+            height=dp(40),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['secondary'])
+        )
+        manual_btn.bind(on_press=lambda x: self.go_manual())
+        manual_card.add_widget(manual_btn)
+        options.add_widget(manual_card)
+        
+        root.add_widget(options)
+        
+        # Back button
+        back_btn = Button(
+            text='◀ Geri',
+            size_hint_y=None,
+            height=dp(42),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        back_btn.bind(on_press=lambda x: self.go_back())
+        root.add_widget(back_btn)
+        
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_cards(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_single_card(widget), 0)
+    
+    def _draw_cards(self):
+        self._draw_single_card(self._result_card)
+        self._draw_single_card(self._auto_card)
+        self._draw_single_card(self._manual_card)
+    
+    def _draw_single_card(self, card):
+        from kivy.graphics import Color, RoundedRectangle
+        card.canvas.before.clear()
+        with card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=card.pos, size=card.size, radius=[dp(12)])
+    
+    def go_auto(self):
+        self.manager.current = 'country_select'
+    
+    def go_manual(self):
+        self.manager.current = 'manual_link_list'
+    
+    def go_back(self):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'auto_input'
+
+
+class CountrySelectScreen(Screen):
+    """Ülke seçim ekranı"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        self.selected_countries = set()
+        self.selected_format = 'm3u8'
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
+    def build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12))
+        
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
+            size_hint=(None, None),
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
+        )
+        back_btn.bind(on_press=lambda x: self.go_back())
+        top_bar.add_widget(back_btn)
+        
+        title = Label(
+            text='🌍 Ülke Seçimi',
+            font_size=dp(18),
+            bold=True,
+            color=get_color_from_hex(COLORS['text_white'])
+        )
+        top_bar.add_widget(title)
+        
+        root.add_widget(top_bar)
+        
+        # Description
+        desc = Label(
+            text='Hangi ülkelerin kanallarını istiyorsunuz?',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
+            size_hint_y=None,
+            height=dp(25)
+        )
+        root.add_widget(desc)
+        
+        # Selection info
+        self.selection_label = Label(
+            text='✓ Seçilen: 0 ülke',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['success']),
+            size_hint_y=None,
+            height=dp(22)
+        )
+        root.add_widget(self.selection_label)
+        
+        # Country grid
+        scroll = ScrollView()
+        self.country_grid = GridLayout(cols=2, spacing=dp(10), size_hint_y=None, padding=dp(5))
+        self.country_grid.bind(minimum_height=self.country_grid.setter('height'))
+        
+        self.country_buttons = {}
+        
+        # Priority countries first
+        for country_id in PRIORITY_COUNTRIES:
+            country_data = COUNTRIES[country_id]
+            btn = self._create_country_button(country_id, country_data, priority=True)
+            self.country_grid.add_widget(btn)
+        
+        # Other countries
+        for country_id, country_data in sorted(COUNTRIES.items(), key=lambda x: x[1]['priority']):
+            if country_id not in PRIORITY_COUNTRIES:
+                btn = self._create_country_button(country_id, country_data)
+                self.country_grid.add_widget(btn)
+        
+        scroll.add_widget(self.country_grid)
+        root.add_widget(scroll)
+        
+        # Format selection
+        format_box = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        
+        format_label = Label(
+            text='Format:',
+            size_hint_x=None,
+            width=dp(55),
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray'])
+        )
+        format_box.add_widget(format_label)
+        
+        self.format_buttons = {}
+        for fmt_id in ['m3u', 'm3u8', 'txt']:
+            fmt_data = FILE_FORMATS[fmt_id]
+            btn = ToggleButton(
+                text=fmt_data['name'],
+                group='format_select',
+                state='down' if fmt_id == 'm3u8' else 'normal',
+                font_size=dp(12),
+                background_normal='',
+                background_color=get_color_from_hex(COLORS['primary']) if fmt_id == 'm3u8' else get_color_from_hex(COLORS['bg_card'])
+            )
+            btn.format_id = fmt_id
+            btn.bind(on_press=self.on_format_select)
+            self.format_buttons[fmt_id] = btn
+            format_box.add_widget(btn)
+        
+        root.add_widget(format_box)
+        
+        # Process button
+        process_btn = Button(
+            text='🚀 Oluştur',
+            font_size=dp(16),
+            bold=True,
+            size_hint_y=None,
+            height=dp(52),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['success'])
+        )
+        process_btn.bind(on_press=self.start_process)
+        root.add_widget(process_btn)
+        
+        self.add_widget(root)
+    
+    def _create_country_button(self, country_id, country_data, priority=False):
+        btn = ToggleButton(
+            text=f"{country_data['flag']} {country_data['name']}",
+            size_hint_y=None,
+            height=dp(55),
+            font_size=dp(12),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['warning']) if priority else get_color_from_hex(COLORS['bg_card'])
+        )
+        btn.country_id = country_id
+        btn.is_priority = priority
+        btn.bind(on_press=self.on_country_toggle)
+        self.country_buttons[country_id] = btn
+        return btn
+    
+    def on_country_toggle(self, btn):
+        if btn.state == 'down':
+            self.selected_countries.add(btn.country_id)
+            btn.background_color = get_color_from_hex(COLORS['success'])
+        else:
+            self.selected_countries.discard(btn.country_id)
+            if btn.is_priority:
+                btn.background_color = get_color_from_hex(COLORS['warning'])
+            else:
+                btn.background_color = get_color_from_hex(COLORS['bg_card'])
+        
+        self.selection_label.text = f'✓ Seçilen: {len(self.selected_countries)} ülke'
+    
+    def on_format_select(self, btn):
+        self.selected_format = btn.format_id
+        for fmt_id, button in self.format_buttons.items():
+            if fmt_id == self.selected_format:
+                button.background_color = get_color_from_hex(COLORS['primary'])
+            else:
+                button.background_color = get_color_from_hex(COLORS['bg_card'])
+    
+    def start_process(self, instance):
+        if not self.selected_countries:
+            self.show_popup('Uyarı', 'Lütfen en az bir ülke seçin!', 'warning')
+            return
+        
+        app = App.get_running_app()
+        app.selected_countries = self.selected_countries
+        app.output_format = self.selected_format
+        
+        self.manager.current = 'processing'
+    
+    def show_popup(self, title, message, popup_type='info'):
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        icon = Label(text='⚠️', font_size=dp(45))
+        content.add_widget(icon)
+        
+        msg = Label(
+            text=message,
+            font_size=dp(14),
+            color=get_color_from_hex(COLORS['text_white']),
+            halign='center'
+        )
+        content.add_widget(msg)
+        
+        btn = Button(
+            text='Tamam',
+            size_hint=(0.5, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['warning'])
+        )
+        
+        popup = Popup(title='', content=content, size_hint=(0.75, 0.35), separator_height=0)
+        btn.bind(on_press=popup.dismiss)
+        content.add_widget(btn)
+        popup.open()
+    
+    def go_back(self):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'auto_result'
+
+
+class ProcessingScreen(Screen):
+    """İşleme ekranı"""
+    
+    def on_enter(self):
+        self.clear_widgets()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+        Clock.schedule_once(lambda dt: self.start_processing(), 0.2)
+    
+    def build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=dp(25), spacing=dp(18))
+        
+        # Title
         title = Label(
             text='⚙️ İşleniyor...',
-            font_size=dp(24),
+            font_size=dp(22),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
+            color=get_color_from_hex(COLORS['text_white']),
             size_hint_y=None,
-            height=dp(50)
+            height=dp(45)
         )
-        layout.add_widget(title)
+        root.add_widget(title)
         
-        # İlerleme
-        self.progress_label = Label(
-            text='Linkleri indiriliyor...',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_secondary']),
+        # Status
+        self.status_label = Label(
+            text='Linkler indiriliyor...',
+            font_size=dp(14),
+            color=get_color_from_hex(COLORS['text_gray']),
             size_hint_y=None,
-            height=dp(30)
+            height=dp(28)
         )
-        layout.add_widget(self.progress_label)
+        root.add_widget(self.status_label)
         
-        self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height=dp(30))
-        layout.add_widget(self.progress_bar)
+        # Progress bar
+        self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height=dp(15))
+        root.add_widget(self.progress_bar)
         
-        # İstatistikler
-        stats_card = StyledCard(size_hint_y=None, height=dp(150))
-        self.stats_layout = BoxLayout(orientation='vertical', spacing=dp(10))
+        # Stats card
+        stats_card = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(12), size_hint_y=None, height=dp(140))
+        stats_card.bind(size=self._update_card, pos=self._update_card)
+        self._stats_card = stats_card
         
-        self.total_channels_label = Label(
+        self.total_label = Label(
             text='📺 Toplam Kanal: 0',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary'])
+            font_size=dp(15),
+            color=get_color_from_hex(COLORS['text_white'])
         )
-        self.filtered_channels_label = Label(
+        stats_card.add_widget(self.total_label)
+        
+        self.filtered_label = Label(
             text='✅ Filtrelenen: 0',
-            font_size=dp(14),
+            font_size=dp(15),
             color=get_color_from_hex(COLORS['success'])
         )
-        self.current_link_label = Label(
+        stats_card.add_widget(self.filtered_label)
+        
+        self.current_label = Label(
             text='🔗 İşlenen: -',
             font_size=dp(12),
-            color=get_color_from_hex(COLORS['text_secondary'])
+            color=get_color_from_hex(COLORS['text_gray'])
         )
+        stats_card.add_widget(self.current_label)
         
-        self.stats_layout.add_widget(self.total_channels_label)
-        self.stats_layout.add_widget(self.filtered_channels_label)
-        self.stats_layout.add_widget(self.current_link_label)
-        
-        stats_card.add_widget(self.stats_layout)
-        layout.add_widget(stats_card)
+        root.add_widget(stats_card)
         
         # Spacer
-        layout.add_widget(Label())
+        root.add_widget(Label())
         
-        self.add_widget(layout)
-        
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_card(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_card(), 0)
+    
+    def _draw_card(self):
+        from kivy.graphics import Color, RoundedRectangle
+        self._stats_card.canvas.before.clear()
+        with self._stats_card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=self._stats_card.pos, size=self._stats_card.size, radius=[dp(12)])
+    
     def start_processing(self):
-        threading.Thread(target=self._process_links, daemon=True).start()
-        
-    def _process_links(self):
+        threading.Thread(target=self._process, daemon=True).start()
+    
+    def _process(self):
         app = App.get_running_app()
         working_links = getattr(app, 'working_links', [])
         selected_countries = getattr(app, 'selected_countries', set())
-        output_format = getattr(app, 'output_format', 'm3u')
+        output_format = getattr(app, 'output_format', 'm3u8')
         
         all_channels = []
         filtered_channels = []
-        total = len(working_links)
+        total_links = len(working_links)
         
         for i, link in enumerate(working_links):
-            Clock.schedule_once(lambda dt, l=link: self._update_current(l))
-            Clock.schedule_once(lambda dt, p=(i+1)/total*50: self._update_progress(p))
+            domain = urlparse(link).netloc or link[:25]
+            Clock.schedule_once(lambda dt, d=domain: setattr(self.current_label, 'text', f'🔗 İşlenen: {d}'))
+            Clock.schedule_once(lambda dt, p=((i+1)/total_links)*70: setattr(self.progress_bar, 'value', p))
             
             try:
-                response = requests.get(link, timeout=30)
-                content = response.text
-                channels, groups = IPTVParser.parse_m3u(content)
-                
-                all_channels.extend(channels)
+                response = requests.get(link, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+                channels, groups = parse_m3u(response.text)
                 
                 for ch in channels:
-                    group_name = ch.get('group', '')
-                    channel_name = ch.get('name', '')
-                    detected_country = IPTVParser.detect_country(group_name, channel_name)
+                    all_channels.append(ch)
+                    
+                    # Detect country from group name and channel name
+                    text_to_check = f"{ch.get('group', '')} {ch.get('name', '')}"
+                    detected_country = detect_country(text_to_check)
                     
                     if detected_country in selected_countries:
                         ch['detected_country'] = detected_country
                         filtered_channels.append(ch)
-                        
-                Clock.schedule_once(lambda dt, t=len(all_channels), f=len(filtered_channels): 
-                    self._update_stats(t, f))
-                    
-            except Exception as e:
-                print(f"Error processing {link}: {e}")
-                continue
                 
-        Clock.schedule_once(lambda dt: self._update_progress(75))
-        Clock.schedule_once(lambda dt: self._update_label('Dosya oluşturuluyor...'))
+                Clock.schedule_once(lambda dt, t=len(all_channels), f=len(filtered_channels): self._update_stats(t, f))
+                
+            except Exception as e:
+                continue
         
-        content = IPTVParser.generate_m3u(filtered_channels, output_format)
+        Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', 'Dosya oluşturuluyor...'))
+        Clock.schedule_once(lambda dt: setattr(self.progress_bar, 'value', 85))
         
-        try:
-            from android.storage import primary_external_storage_path
-            download_path = os.path.join(primary_external_storage_path(), 'Download')
-        except:
-            download_path = os.path.expanduser('~')
-            
+        # Generate output
+        if output_format == 'txt':
+            content = generate_txt(filtered_channels)
+            ext = '.txt'
+        else:
+            content = generate_m3u(filtered_channels, output_format)
+            ext = FILE_FORMATS.get(output_format, {}).get('ext', '.m3u')
+        
+        # Save file
+        download_path = get_download_path()
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         countries_str = '_'.join(sorted(selected_countries)[:3])
-        filename = f'iptv_{countries_str}_{timestamp}.{output_format}'
+        filename = f'iptv_{countries_str}_{timestamp}{ext}'
         filepath = os.path.join(download_path, filename)
         
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
         except Exception as e:
-            print(f"Error saving file: {e}")
-            
+            pass
+        
         app.output_filepath = filepath
+        app.output_filename = filename
         app.filtered_channels = filtered_channels
+        app.total_channels = all_channels
         
-        Clock.schedule_once(lambda dt: self._update_progress(100))
-        Clock.schedule_once(self._processing_complete)
-        
-    def _update_progress(self, value):
-        self.progress_bar.value = value
-        
-    def _update_label(self, text):
-        self.progress_label.text = text
-        
-    def _update_current(self, link):
-        self.current_link_label.text = f'🔗 İşlenen: {link[:40]}...'
-        
+        Clock.schedule_once(lambda dt: setattr(self.progress_bar, 'value', 100))
+        Clock.schedule_once(lambda dt: self._complete())
+    
     def _update_stats(self, total, filtered):
-        self.total_channels_label.text = f'📺 Toplam Kanal: {total}'
-        self.filtered_channels_label.text = f'✅ Filtrelenen: {filtered}'
-        
-    def _processing_complete(self, dt):
-        self.manager.transition = SlideTransition(direction='left')
+        self.total_label.text = f'📺 Toplam Kanal: {total}'
+        self.filtered_label.text = f'✅ Filtrelenen: {filtered}'
+    
+    def _complete(self):
         self.manager.current = 'complete'
 
 
-class ManualEditListScreen(BaseScreen):
-    """Manuel düzenleme - link listesi"""
+class ManualLinkListScreen(Screen):
+    """Manuel düzenleme - Link listesi"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
     def on_enter(self):
         self.clear_widgets()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
     def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
         app = App.get_running_app()
         working_links = getattr(app, 'working_links', [])
         
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50))
+        root = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12))
         
-        back_btn = RoundedButton(
-            text='<',
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
             size_hint=(None, None),
-            size=(dp(50), dp(40)),
-            bg_color=COLORS['bg_light']
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
         )
-        back_btn.bind(on_press=self.go_back)
+        back_btn.bind(on_press=lambda x: self.go_back())
         top_bar.add_widget(back_btn)
         
         title = Label(
             text='✏️ Manuel Düzenleme',
-            font_size=dp(20),
+            font_size=dp(17),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
+            color=get_color_from_hex(COLORS['text_white'])
         )
         top_bar.add_widget(title)
         
-        layout.add_widget(top_bar)
+        root.add_widget(top_bar)
         
-        # Açıklama
+        # Description
         desc = Label(
             text=f'{len(working_links)} çalışan link bulundu.\nDüzenlemek istediğiniz linke tıklayın.',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
             size_hint_y=None,
-            height=dp(50),
+            height=dp(40),
             halign='center'
         )
-        desc.bind(size=desc.setter('text_size'))
-        layout.add_widget(desc)
+        desc.bind(size=lambda w, s: setattr(w, 'text_size', s))
+        root.add_widget(desc)
         
-        # Link listesi
+        # Link list
         scroll = ScrollView()
         list_layout = BoxLayout(orientation='vertical', spacing=dp(10), size_hint_y=None)
         list_layout.bind(minimum_height=list_layout.setter('height'))
@@ -2054,440 +2288,445 @@ class ManualEditListScreen(BaseScreen):
         for i, link in enumerate(working_links):
             item = self._create_link_item(i + 1, link)
             list_layout.add_widget(item)
-            
+        
         scroll.add_widget(list_layout)
-        layout.add_widget(scroll)
+        root.add_widget(scroll)
         
-        self.add_widget(layout)
-        
+        self.add_widget(root)
+    
     def _create_link_item(self, index, link):
-        item = StyledCard(size_hint_y=None, height=dp(80))
-        inner = BoxLayout(orientation='horizontal', spacing=dp(10))
+        item = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(70), 
+                        padding=dp(12), spacing=dp(10))
+        item.bind(size=self._update_item, pos=self._update_item)
+        item._is_card = True
         
-        # İndeks
+        # Index
         index_label = Label(
             text=str(index),
-            font_size=dp(20),
+            font_size=dp(18),
             bold=True,
             color=get_color_from_hex(COLORS['primary']),
             size_hint_x=None,
-            width=dp(40)
+            width=dp(35)
         )
-        inner.add_widget(index_label)
+        item.add_widget(index_label)
         
-        # Link bilgisi
-        info_layout = BoxLayout(orientation='vertical')
+        # Link info
+        info = BoxLayout(orientation='vertical', spacing=dp(2))
         
-        domain = urlparse(link).netloc or link[:30]
-        
+        domain = urlparse(link).netloc or link[:25]
         domain_label = Label(
             text=domain,
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_white']),
             halign='left'
         )
-        domain_label.bind(size=domain_label.setter('text_size'))
+        domain_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
         
+        link_short = link[:45] + '...' if len(link) > 45 else link
         link_label = Label(
-            text=link[:50] + '...' if len(link) > 50 else link,
-            font_size=dp(11),
-            color=get_color_from_hex(COLORS['text_secondary']),
+            text=link_short,
+            font_size=dp(10),
+            color=get_color_from_hex(COLORS['text_gray']),
             halign='left'
         )
-        link_label.bind(size=link_label.setter('text_size'))
+        link_label.bind(size=lambda w, s: setattr(w, 'text_size', s))
         
-        info_layout.add_widget(domain_label)
-        info_layout.add_widget(link_label)
-        inner.add_widget(info_layout)
+        info.add_widget(domain_label)
+        info.add_widget(link_label)
+        item.add_widget(info)
         
-        # Düzenle butonu
-        edit_btn = RoundedButton(
+        # Edit button
+        edit_btn = Button(
             text='📝',
             size_hint=(None, None),
-            size=(dp(50), dp(50)),
-            bg_color=COLORS['primary']
+            size=(dp(48), dp(48)),
+            font_size=dp(20),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
         )
         edit_btn.link_url = link
         edit_btn.link_index = index
         edit_btn.bind(on_press=self.edit_link)
-        inner.add_widget(edit_btn)
+        item.add_widget(edit_btn)
         
-        item.add_widget(inner)
         return item
+    
+    def _update_item(self, widget, value):
+        if getattr(widget, '_is_card', False):
+            Clock.schedule_once(lambda dt: self._draw_item(widget), 0)
+    
+    def _draw_item(self, item):
+        from kivy.graphics import Color, RoundedRectangle
+        item.canvas.before.clear()
+        with item.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=item.pos, size=item.size, radius=[dp(10)])
+    
+    def edit_link(self, btn):
+        app = App.get_running_app()
+        app.current_edit_link = btn.link_url
+        app.current_edit_index = btn.link_index
+        app.source_mode = 'auto_manual'
         
-    def go_back(self, instance):
+        self.manager.current = 'link_editor'
+    
+    def go_back(self):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'auto_result'
-        
-    def edit_link(self, instance):
-        app = App.get_running_app()
-        app.current_edit_link = instance.link_url
-        app.current_edit_index = instance.link_index
-        
-        self.manager.transition = SlideTransition(direction='left')
-        self.manager.current = 'link_editor'
 
 
-class LinkEditorScreen(BaseScreen):
+class LinkEditorScreen(Screen):
     """Tek link düzenleme ekranı"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.selected_groups = set()
-        self.channels = []
-        self.groups = {}
-        
     def on_enter(self):
         self.clear_widgets()
         self.selected_groups = set()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        Clock.schedule_once(lambda dt: self.load_link_content(), 0.2)
-        
+        self.channels = []
+        self.groups = {}
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+        Clock.schedule_once(lambda dt: self.load_link(), 0.1)
+    
     def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        
         app = App.get_running_app()
         link_index = getattr(app, 'current_edit_index', 1)
         working_links = getattr(app, 'working_links', [])
         
-        # Üst bar
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        root = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
         
-        back_btn = RoundedButton(
-            text='<',
+        # Top bar
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        
+        back_btn = Button(
+            text='◀',
             size_hint=(None, None),
-            size=(dp(50), dp(40)),
-            bg_color=COLORS['bg_light']
+            size=(dp(48), dp(42)),
+            font_size=dp(18),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
         )
-        back_btn.bind(on_press=self.go_back)
+        back_btn.bind(on_press=lambda x: self.go_back())
         top_bar.add_widget(back_btn)
         
         title = Label(
             text=f'Link {link_index}/{len(working_links)}',
-            font_size=dp(18),
+            font_size=dp(16),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
+            color=get_color_from_hex(COLORS['text_white'])
         )
         top_bar.add_widget(title)
         
-        layout.add_widget(top_bar)
+        root.add_widget(top_bar)
         
-        # Yükleniyor göstergesi
+        # Loading indicator
         self.loading_label = Label(
             text='⏳ Kanallar yükleniyor...',
-            font_size=dp(16),
-            color=get_color_from_hex(COLORS['text_secondary'])
+            font_size=dp(15),
+            color=get_color_from_hex(COLORS['text_gray'])
         )
-        layout.add_widget(self.loading_label)
+        root.add_widget(self.loading_label)
         
-        # Kanal listesi (başta gizli)
-        self.content_layout = BoxLayout(orientation='vertical', spacing=dp(10))
-        self.content_layout.opacity = 0
+        # Content (hidden initially)
+        self.content_layout = BoxLayout(orientation='vertical', spacing=dp(10), opacity=0)
         
-        # İstatistikler
         self.stats_label = Label(
             text='',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary']),
-            size_hint_y=None,
-            height=dp(30)
-        )
-        self.content_layout.add_widget(self.stats_label)
-        
-        # Seçim bilgisi
-        self.selection_label = Label(
-            text='Seçilen: 0 grup',
-            font_size=dp(12),
-            color=get_color_from_hex(COLORS['success']),
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray']),
             size_hint_y=None,
             height=dp(25)
         )
+        self.content_layout.add_widget(self.stats_label)
+        
+        self.selection_label = Label(
+            text='✓ Seçilen: 0 grup',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['success']),
+            size_hint_y=None,
+            height=dp(22)
+        )
         self.content_layout.add_widget(self.selection_label)
         
-        # Kanal listesi scroll
         scroll = ScrollView()
         self.list_layout = BoxLayout(orientation='vertical', spacing=dp(8), size_hint_y=None)
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
         scroll.add_widget(self.list_layout)
         self.content_layout.add_widget(scroll)
         
-        layout.add_widget(self.content_layout)
+        root.add_widget(self.content_layout)
         
-        # Alt butonlar
-        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(10), opacity=0)
+        # Bottom buttons
+        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10), opacity=0)
         
-        save_btn = RoundedButton(
+        save_btn = Button(
             text='💾 Kaydet',
-            bg_color=COLORS['success']
+            font_size=dp(14),
+            bold=True,
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['success'])
         )
         save_btn.bind(on_press=self.save_selection)
         self.bottom_bar.add_widget(save_btn)
         
-        layout.add_widget(self.bottom_bar)
+        root.add_widget(self.bottom_bar)
         
-        self.add_widget(layout)
-        
-    def load_link_content(self):
+        self.add_widget(root)
+    
+    def load_link(self):
         threading.Thread(target=self._load_content, daemon=True).start()
-        
+    
     def _load_content(self):
         app = App.get_running_app()
         link = getattr(app, 'current_edit_link', '')
         
         try:
-            response = requests.get(link, timeout=30)
-            channels, groups = IPTVParser.parse_m3u(response.text)
-            
-            self.channels = channels
-            self.groups = groups
-            
-            Clock.schedule_once(self._display_content)
-            
+            response = requests.get(link, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+            self.channels, self.groups = parse_m3u(response.text)
+            Clock.schedule_once(lambda dt: self._display_content())
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(str(e)))
-            
-    def _display_content(self, dt):
+            Clock.schedule_once(lambda dt: self._show_error(str(e)[:50]))
+    
+    def _display_content(self):
         self.loading_label.opacity = 0
         self.content_layout.opacity = 1
         self.bottom_bar.opacity = 1
         
         self.stats_label.text = f'📊 {len(self.groups)} grup • {len(self.channels)} kanal'
         
+        self.group_cards = {}
         for group_name, group_data in sorted(self.groups.items()):
-            item = ChannelGroupItem(
-                group_name=group_name,
-                channel_count=len(group_data['channels']),
-                on_select=self.on_group_select
-            )
-            self.list_layout.add_widget(item)
-            
+            card = ChannelGroupCard(on_select_callback=self.on_group_select)
+            card.group_name = group_name
+            card.channel_count = len(group_data['channels'])
+            self.group_cards[group_name] = card
+            self.list_layout.add_widget(card)
+    
     def _show_error(self, error):
         self.loading_label.text = f'❌ Hata: {error}'
-        
+    
     def on_group_select(self, group_name, selected):
         if selected:
             self.selected_groups.add(group_name)
         else:
             self.selected_groups.discard(group_name)
-            
-        self.selection_label.text = f'Seçilen: {len(self.selected_groups)} grup'
         
-    def go_back(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'manual_edit_list'
-        
+        total_channels = sum(len(self.groups[g]['channels']) for g in self.selected_groups if g in self.groups)
+        self.selection_label.text = f'✓ Seçilen: {len(self.selected_groups)} grup ({total_channels} kanal)'
+    
     def save_selection(self, instance):
         if not self.selected_groups:
-            self.show_message('Uyarı', 'Lütfen en az bir grup seçin!')
+            self.show_popup('Uyarı', 'Lütfen en az bir grup seçin!', 'warning')
             return
-            
+        
         selected_channels = []
         for group_name in self.selected_groups:
             if group_name in self.groups:
                 selected_channels.extend(self.groups[group_name]['channels'])
-                
-        content = IPTVParser.generate_m3u(selected_channels)
         
-        try:
-            from android.storage import primary_external_storage_path
-            download_path = os.path.join(primary_external_storage_path(), 'Download')
-        except:
-            download_path = os.path.expanduser('~')
-            
+        content = generate_m3u(selected_channels)
+        
         app = App.get_running_app()
         link_index = getattr(app, 'current_edit_index', 1)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        download_path = get_download_path()
+        timestamp = datetime.now().strftime('%H%M%S')
         filename = f'iptv_link{link_index}_{timestamp}.m3u'
         filepath = os.path.join(download_path, filename)
         
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
-            self.show_save_success(filepath)
+            
+            self.show_save_success(filename, len(selected_channels))
         except Exception as e:
-            self.show_message('Hata', f'Kaydetme hatası: {str(e)}')
+            self.show_popup('Hata', f'Kaydetme hatası: {str(e)[:50]}', 'error')
+    
+    def show_popup(self, title, message, popup_type='info'):
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
         
-    def show_message(self, title, message):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
-        
-        icon = Label(text='⚠️', font_size=dp(50))
+        icon = Label(text='⚠️', font_size=dp(45))
         content.add_widget(icon)
         
-        label = Label(
+        msg = Label(
             text=message,
             font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_primary']),
+            color=get_color_from_hex(COLORS['text_white']),
             halign='center'
         )
-        label.bind(size=label.setter('text_size'))
-        content.add_widget(label)
+        content.add_widget(msg)
         
-        btn = RoundedButton(
+        btn = Button(
             text='Tamam',
             size_hint=(0.5, None),
-            height=dp(45),
+            height=dp(42),
             pos_hint={'center_x': 0.5},
-            bg_color=COLORS['warning']
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['warning'])
         )
         
-        popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.8, 0.35),
-            separator_height=0
-        )
-        
+        popup = Popup(title='', content=content, size_hint=(0.75, 0.35), separator_height=0)
         btn.bind(on_press=popup.dismiss)
         content.add_widget(btn)
         popup.open()
-        
-    def show_save_success(self, filepath):
+    
+    def show_save_success(self, filename, channel_count):
         content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
         
         icon = Label(text='✅', font_size=dp(50))
         content.add_widget(icon)
         
-        title_label = Label(
+        title_lbl = Label(
             text='Başarıyla Kaydedildi!',
-            font_size=dp(18),
+            font_size=dp(17),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary'])
+            color=get_color_from_hex(COLORS['text_white'])
         )
-        content.add_widget(title_label)
+        content.add_widget(title_lbl)
         
-        path_label = Label(
-            text=filepath,
-            font_size=dp(11),
-            color=get_color_from_hex(COLORS['text_secondary']),
+        info_lbl = Label(
+            text=f'{channel_count} kanal\n📁 {filename}',
+            font_size=dp(12),
+            color=get_color_from_hex(COLORS['text_gray']),
             halign='center'
         )
-        path_label.bind(size=path_label.setter('text_size'))
-        content.add_widget(path_label)
+        content.add_widget(info_lbl)
         
-        btn_layout = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(45))
-        
-        back_btn = RoundedButton(
+        btn = Button(
             text='Listeye Dön',
-            bg_color=COLORS['primary']
+            size_hint=(0.6, None),
+            height=dp(42),
+            pos_hint={'center_x': 0.5},
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
         )
         
-        popup = Popup(
-            title='',
-            content=content,
-            size_hint=(0.9, 0.45),
-            separator_height=0
-        )
+        popup = Popup(title='', content=content, size_hint=(0.8, 0.45), separator_height=0)
         
         def go_list(x):
             popup.dismiss()
             self.manager.transition = SlideTransition(direction='right')
-            self.manager.current = 'manual_edit_list'
-            
-        back_btn.bind(on_press=go_list)
-        btn_layout.add_widget(back_btn)
+            self.manager.current = 'manual_link_list'
         
-        content.add_widget(btn_layout)
+        btn.bind(on_press=go_list)
+        content.add_widget(btn)
         popup.open()
+    
+    def go_back(self):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'manual_link_list'
 
 
-class CompleteScreen(BaseScreen):
+class CompleteScreen(Screen):
     """İşlem tamamlandı ekranı"""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
     def on_enter(self):
         self.clear_widgets()
-        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
-        
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.05)
+    
     def build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
-        
         app = App.get_running_app()
         filepath = getattr(app, 'output_filepath', '')
-        filtered = len(getattr(app, 'filtered_channels', []))
+        filename = getattr(app, 'output_filename', '')
+        filtered = getattr(app, 'filtered_channels', [])
+        total = getattr(app, 'total_channels', [])
         
-        # Başarı ikonu
-        icon = Label(text='🎉', font_size=dp(80), size_hint_y=0.3)
-        layout.add_widget(icon)
+        root = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
         
-        # Başlık
+        # Success icon
+        icon = Label(
+            text='🎉',
+            font_size=dp(70),
+            size_hint_y=0.25
+        )
+        root.add_widget(icon)
+        
+        # Title
         title = Label(
             text='İşlem Tamamlandı!',
-            font_size=dp(28),
+            font_size=dp(26),
             bold=True,
-            color=get_color_from_hex(COLORS['text_primary']),
+            color=get_color_from_hex(COLORS['text_white']),
             size_hint_y=None,
-            height=dp(50)
+            height=dp(45)
         )
-        layout.add_widget(title)
+        root.add_widget(title)
         
-        # Sonuç kartı
-        result_card = StyledCard(size_hint_y=None, height=dp(150))
-        result_inner = BoxLayout(orientation='vertical', spacing=dp(15))
+        # Results card
+        result_card = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(12), size_hint_y=None, height=dp(140))
+        result_card.bind(size=self._update_card, pos=self._update_card)
+        self._result_card = result_card
         
-        channel_label = Label(
-            text=f'📺 {filtered} kanal filtrelendi',
-            font_size=dp(18),
+        result_card.add_widget(Label(
+            text=f'📺 {len(filtered)} kanal filtrelendi',
+            font_size=dp(17),
             color=get_color_from_hex(COLORS['success'])
-        )
-        result_inner.add_widget(channel_label)
+        ))
         
-        file_label = Label(
-            text='📁 Dosya kaydedildi:',
-            font_size=dp(14),
-            color=get_color_from_hex(COLORS['text_secondary'])
-        )
-        result_inner.add_widget(file_label)
+        result_card.add_widget(Label(
+            text=f'📊 Toplam {len(total)} kanaldan seçildi',
+            font_size=dp(13),
+            color=get_color_from_hex(COLORS['text_gray'])
+        ))
         
-        path_label = Label(
-            text=os.path.basename(filepath) if filepath else 'Bilinmiyor',
+        result_card.add_widget(Label(
+            text=f'📁 {filename}',
             font_size=dp(12),
             color=get_color_from_hex(COLORS['primary'])
-        )
-        result_inner.add_widget(path_label)
+        ))
         
-        result_card.add_widget(result_inner)
-        layout.add_widget(result_card)
+        root.add_widget(result_card)
         
         # Spacer
-        layout.add_widget(Label())
+        root.add_widget(Label())
         
-        # Butonlar
-        btn_layout = BoxLayout(orientation='vertical', spacing=dp(15), size_hint_y=None, height=dp(120))
+        # Buttons
+        btns = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None, height=dp(110))
         
-        new_btn = RoundedButton(
+        new_btn = Button(
             text='🔄 Yeni İşlem',
-            size_hint=(1, None),
-            height=dp(50),
-            bg_color=COLORS['primary']
+            font_size=dp(15),
+            bold=True,
+            size_hint_y=None,
+            height=dp(48),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['primary'])
         )
-        new_btn.bind(on_press=self.new_process)
-        btn_layout.add_widget(new_btn)
+        new_btn.bind(on_press=lambda x: self.go_to('auto_input'))
+        btns.add_widget(new_btn)
         
-        home_btn = RoundedButton(
+        home_btn = Button(
             text='🏠 Ana Sayfa',
-            size_hint=(1, None),
-            height=dp(50),
-            bg_color=COLORS['bg_light']
+            font_size=dp(15),
+            bold=True,
+            size_hint_y=None,
+            height=dp(48),
+            background_normal='',
+            background_color=get_color_from_hex(COLORS['bg_card'])
         )
-        home_btn.bind(on_press=self.go_home)
-        btn_layout.add_widget(home_btn)
+        home_btn.bind(on_press=lambda x: self.go_to('welcome'))
+        btns.add_widget(home_btn)
         
-        layout.add_widget(btn_layout)
+        root.add_widget(btns)
         
-        self.add_widget(layout)
-        
-    def new_process(self, instance):
+        self.add_widget(root)
+        Clock.schedule_once(lambda dt: self._draw_card(), 0.1)
+    
+    def _update_card(self, widget, value):
+        Clock.schedule_once(lambda dt: self._draw_card(), 0)
+    
+    def _draw_card(self):
+        from kivy.graphics import Color, RoundedRectangle
+        self._result_card.canvas.before.clear()
+        with self._result_card.canvas.before:
+            Color(*get_color_from_hex(COLORS['bg_card']))
+            RoundedRectangle(pos=self._result_card.pos, size=self._result_card.size, radius=[dp(15)])
+    
+    def go_to(self, screen):
         self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'auto_input'
-        
-    def go_home(self, instance):
-        self.manager.transition = SlideTransition(direction='right')
-        self.manager.current = 'welcome'
+        self.manager.current = screen
 
 
-# ========================= ANA UYGULAMA =========================
+# ==================== ANA UYGULAMA ====================
 
 class IPTVEditorApp(App):
     """Ana uygulama sınıfı"""
@@ -2496,8 +2735,8 @@ class IPTVEditorApp(App):
         # Pencere ayarları
         Window.clearcolor = get_color_from_hex(COLORS['bg_dark'])
         
-        # Ekran yöneticisi
-        sm = ScreenManager()
+        # Screen Manager
+        sm = ScreenManager(transition=SlideTransition())
         
         # Ekranları ekle
         sm.add_widget(WelcomeScreen(name='welcome'))
@@ -2508,12 +2747,13 @@ class IPTVEditorApp(App):
         sm.add_widget(AutoResultScreen(name='auto_result'))
         sm.add_widget(CountrySelectScreen(name='country_select'))
         sm.add_widget(ProcessingScreen(name='processing'))
-        sm.add_widget(ManualEditListScreen(name='manual_edit_list'))
+        sm.add_widget(ManualLinkListScreen(name='manual_link_list'))
         sm.add_widget(LinkEditorScreen(name='link_editor'))
         sm.add_widget(CompleteScreen(name='complete'))
         
         return sm
 
 
+# Uygulamayı başlat
 if __name__ == '__main__':
     IPTVEditorApp().run()
