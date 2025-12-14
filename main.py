@@ -6,6 +6,7 @@ Python + Kivy ile Android APK
 import os
 import re
 import json
+import traceback
 import threading
 import requests
 from datetime import datetime
@@ -31,6 +32,21 @@ from kivy.graphics import Color, RoundedRectangle, Rectangle
 from kivy.metrics import dp
 from kivy.utils import get_color_from_hex
 from kivy.properties import StringProperty, ListProperty, BooleanProperty, NumericProperty
+
+# Hata yakalama - Android'de log dosyasına yazar
+def handle_exception(exc_type, exc_value, exc_traceback):
+    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    try:
+        from android.storage import primary_external_storage_path
+        log_path = os.path.join(primary_external_storage_path(), 'Download', 'iptv_error.txt')
+    except:
+        log_path = '/sdcard/Download/iptv_error.txt'
+    
+    with open(log_path, 'w') as f:
+        f.write(error_msg)
+
+import sys
+sys.excepthook = handle_exception
 
 # Renk Paleti - Pastel ve Profesyonel
 COLORS = {
