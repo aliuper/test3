@@ -5,6 +5,7 @@ package.domain = com.yengec
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0.0
+icon.filename = icon.png
 
 # Python 3.11.9 - Android için en stabil versiyon
 requirements = python3==3.11.9,kivy==2.3.0,requests,urllib3,certifi,pillow
