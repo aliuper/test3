@@ -1,37 +1,18 @@
 """
 IPTV Editor Pro - Gelişmiş IPTV Düzenleyici
 Python + Kivy ile Android APK
+Version: 2.0.0
 """
 
 import os
+import sys
 import re
 import json
 import traceback
 import threading
-import requests
 from datetime import datetime
 from urllib.parse import urlparse
 from functools import partial
-
-from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.popup import Popup
-from kivy.uix.checkbox import CheckBox
-from kivy.uix.progressbar import ProgressBar
-from kivy.uix.spinner import Spinner
-from kivy.uix.image import AsyncImage
-from kivy.clock import Clock
-from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle, Rectangle
-from kivy.metrics import dp
-from kivy.utils import get_color_from_hex
-from kivy.properties import StringProperty, ListProperty, BooleanProperty, NumericProperty
 
 # Hata yakalama - Android'de log dosyasına yazar
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -41,31 +22,54 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         log_path = os.path.join(primary_external_storage_path(), 'Download', 'iptv_error.txt')
     except:
         log_path = '/sdcard/Download/iptv_error.txt'
-    
-    with open(log_path, 'w') as f:
-        f.write(error_msg)
+    try:
+        with open(log_path, 'w') as f:
+            f.write(error_msg)
+    except:
+        pass
 
-import sys
 sys.excepthook = handle_exception
 
-# Renk Paleti - Pastel ve Profesyonel
+# Kivy ayarları - import'lardan önce olmalı
+os.environ['KIVY_LOG_LEVEL'] = 'warning'
+
+import requests
+from kivy.app import App
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.popup import Popup
+from kivy.uix.progressbar import ProgressBar
+from kivy.uix.spinner import Spinner
+from kivy.clock import Clock
+from kivy.core.window import Window
+from kivy.graphics import Color, RoundedRectangle, Rectangle
+from kivy.metrics import dp
+from kivy.utils import get_color_from_hex
+from kivy.properties import BooleanProperty
+
+# Renk Paleti
 COLORS = {
-    'primary': '#6C63FF',        # Ana mor
-    'primary_light': '#8B85FF',  # Açık mor
-    'secondary': '#FF6B9D',      # Pembe
-    'success': '#4ECDC4',        # Turkuaz
-    'warning': '#FFE66D',        # Sarı
-    'danger': '#FF6B6B',         # Kırmızı
-    'bg_dark': '#1A1A2E',        # Koyu arka plan
-    'bg_medium': '#16213E',      # Orta arka plan
-    'bg_light': '#0F3460',       # Açık arka plan
-    'card_bg': '#252A40',        # Kart arka planı
-    'text_primary': '#FFFFFF',   # Ana metin
-    'text_secondary': '#B8B8D1', # İkincil metin
-    'border': '#3D3D5C',         # Kenarlık
+    'primary': '#6C63FF',
+    'primary_light': '#8B85FF',
+    'secondary': '#FF6B9D',
+    'success': '#4ECDC4',
+    'warning': '#FFE66D',
+    'danger': '#FF6B6B',
+    'bg_dark': '#1A1A2E',
+    'bg_medium': '#16213E',
+    'bg_light': '#0F3460',
+    'card_bg': '#252A40',
+    'text_primary': '#FFFFFF',
+    'text_secondary': '#B8B8D1',
+    'border': '#3D3D5C',
 }
 
-# Ülke Kodları ve Eşleşmeleri
+# Ülke Kodları
 COUNTRY_CODES = {
     'turkey': ['tr', 'tur', 'turkey', 'türkiye', 'turkiye', 'turkish', 'turk'],
     'germany': ['de', 'ger', 'germany', 'deutschland', 'german', 'deutsch', 'deu'],
@@ -79,10 +83,10 @@ COUNTRY_CODES = {
     'netherlands': ['nl', 'nld', 'netherlands', 'dutch', 'holland'],
     'poland': ['pl', 'pol', 'poland', 'polish', 'polska'],
     'russia': ['ru', 'rus', 'russia', 'russian'],
-    'arabic': ['ar', 'ara', 'arabic', 'arab', 'عربي'],
+    'arabic': ['ar', 'ara', 'arabic', 'arab'],
     'india': ['in', 'ind', 'india', 'indian', 'hindi'],
     'portugal': ['pt', 'por', 'portugal', 'portuguese', 'brasil', 'brazil'],
-    'greece': ['gr', 'gre', 'greece', 'greek', 'ελληνικά'],
+    'greece': ['gr', 'gre', 'greece', 'greek'],
     'albania': ['al', 'alb', 'albania', 'albanian', 'shqip'],
     'serbia': ['rs', 'srb', 'serbia', 'serbian', 'srpski'],
     'croatia': ['hr', 'hrv', 'croatia', 'croatian', 'hrvatski'],
@@ -91,28 +95,31 @@ COUNTRY_CODES = {
 }
 
 COUNTRY_FLAGS = {
-    'turkey': '🇹🇷',
-    'germany': '🇩🇪',
-    'romania': '🇷🇴',
-    'austria': '🇦🇹',
-    'france': '🇫🇷',
-    'italy': '🇮🇹',
-    'spain': '🇪🇸',
-    'uk': '🇬🇧',
-    'usa': '🇺🇸',
-    'netherlands': '🇳🇱',
-    'poland': '🇵🇱',
-    'russia': '🇷🇺',
-    'arabic': '🇸🇦',
-    'india': '🇮🇳',
-    'portugal': '🇵🇹',
-    'greece': '🇬🇷',
-    'albania': '🇦🇱',
-    'serbia': '🇷🇸',
-    'croatia': '🇭🇷',
-    'bulgaria': '🇧🇬',
+    'turkey': '🇹🇷', 'germany': '🇩🇪', 'romania': '🇷🇴', 'austria': '🇦🇹',
+    'france': '🇫🇷', 'italy': '🇮🇹', 'spain': '🇪🇸', 'uk': '🇬🇧',
+    'usa': '🇺🇸', 'netherlands': '🇳🇱', 'poland': '🇵🇱', 'russia': '🇷🇺',
+    'arabic': '🇸🇦', 'india': '🇮🇳', 'portugal': '🇵🇹', 'greece': '🇬🇷',
+    'albania': '🇦🇱', 'serbia': '🇷🇸', 'croatia': '🇭🇷', 'bulgaria': '🇧🇬',
     'other': '🌍'
 }
+
+
+def safe_canvas_update(widget, draw_func):
+    """Güvenli canvas güncelleme - Android uyumlu"""
+    try:
+        widget.canvas.before.clear()
+        draw_func()
+    except Exception:
+        Clock.schedule_once(lambda dt: safe_canvas_retry(widget, draw_func), 0.1)
+
+
+def safe_canvas_retry(widget, draw_func):
+    """Canvas güncelleme retry"""
+    try:
+        widget.canvas.before.clear()
+        draw_func()
+    except Exception:
+        pass
 
 
 class RoundedButton(Button):
@@ -123,13 +130,28 @@ class RoundedButton(Button):
         self.background_color = (0, 0, 0, 0)
         self.background_normal = ''
         self.bg_color = bg_color
-        self.bind(pos=self.update_canvas, size=self.update_canvas)
+        self._draw_scheduled = False
+        Clock.schedule_once(lambda dt: self._bind_events(), 0)
         
+    def _bind_events(self):
+        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
+        self._do_draw()
+    
+    def _schedule_draw(self, *args):
+        if not self._draw_scheduled:
+            self._draw_scheduled = True
+            Clock.schedule_once(lambda dt: self._do_draw(), 0)
+    
+    def _do_draw(self):
+        self._draw_scheduled = False
+        def draw():
+            with self.canvas.before:
+                Color(*get_color_from_hex(self.bg_color))
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+        safe_canvas_update(self, draw)
+    
     def update_canvas(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(self.bg_color))
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+        self._do_draw()
 
 
 class StyledCard(BoxLayout):
@@ -140,13 +162,25 @@ class StyledCard(BoxLayout):
         self.orientation = 'vertical'
         self.padding = dp(15)
         self.spacing = dp(10)
-        self.bind(pos=self.update_canvas, size=self.update_canvas)
+        self._draw_scheduled = False
+        Clock.schedule_once(lambda dt: self._bind_events(), 0)
         
-    def update_canvas(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['card_bg']))
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(15)])
+    def _bind_events(self):
+        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
+        self._do_draw()
+    
+    def _schedule_draw(self, *args):
+        if not self._draw_scheduled:
+            self._draw_scheduled = True
+            Clock.schedule_once(lambda dt: self._do_draw(), 0)
+    
+    def _do_draw(self):
+        self._draw_scheduled = False
+        def draw():
+            with self.canvas.before:
+                Color(*get_color_from_hex(COLORS['card_bg']))
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(15)])
+        safe_canvas_update(self, draw)
 
 
 class ChannelGroupItem(BoxLayout):
@@ -163,20 +197,21 @@ class ChannelGroupItem(BoxLayout):
         self.spacing = dp(10)
         self.group_name = group_name
         self.on_select_callback = on_select
+        self._draw_scheduled = False
         
-        self.bind(pos=self.update_canvas, size=self.update_canvas)
+        Clock.schedule_once(lambda dt: self._build_ui(channel_count), 0)
+        
+    def _build_ui(self, channel_count):
+        self.bind(pos=self._schedule_draw, size=self._schedule_draw)
         
         # Logo
-        if logo_url:
-            logo = AsyncImage(source=logo_url, size_hint=(None, None), size=(dp(50), dp(50)))
-        else:
-            logo = Label(text='📺', font_size=dp(30), size_hint=(None, None), size=(dp(50), dp(50)))
+        logo = Label(text='📺', font_size=dp(30), size_hint=(None, None), size=(dp(50), dp(50)))
         self.add_widget(logo)
         
         # Grup bilgisi
         info_layout = BoxLayout(orientation='vertical', spacing=dp(2))
         name_label = Label(
-            text=group_name,
+            text=self.group_name,
             font_size=dp(16),
             color=get_color_from_hex(COLORS['text_primary']),
             halign='left',
@@ -199,7 +234,7 @@ class ChannelGroupItem(BoxLayout):
         
         # Seçim butonu
         self.select_btn = RoundedButton(
-            text='＋',
+            text='+',
             size_hint=(None, None),
             size=(dp(50), dp(50)),
             font_size=dp(24),
@@ -208,14 +243,23 @@ class ChannelGroupItem(BoxLayout):
         self.select_btn.bind(on_press=self.toggle_selection)
         self.add_widget(self.select_btn)
         
-    def update_canvas(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            if self.selected:
-                Color(*get_color_from_hex(COLORS['success']), 0.3)
-            else:
-                Color(*get_color_from_hex(COLORS['card_bg']))
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+        self._do_draw()
+    
+    def _schedule_draw(self, *args):
+        if not self._draw_scheduled:
+            self._draw_scheduled = True
+            Clock.schedule_once(lambda dt: self._do_draw(), 0)
+    
+    def _do_draw(self):
+        self._draw_scheduled = False
+        def draw():
+            with self.canvas.before:
+                if self.selected:
+                    Color(*get_color_from_hex(COLORS['success']), 0.3)
+                else:
+                    Color(*get_color_from_hex(COLORS['card_bg']))
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+        safe_canvas_update(self, draw)
             
     def toggle_selection(self, instance):
         self.selected = not self.selected
@@ -223,10 +267,10 @@ class ChannelGroupItem(BoxLayout):
             self.select_btn.text = '✓'
             self.select_btn.bg_color = COLORS['success']
         else:
-            self.select_btn.text = '＋'
+            self.select_btn.text = '+'
             self.select_btn.bg_color = COLORS['primary']
         self.select_btn.update_canvas()
-        self.update_canvas()
+        self._do_draw()
         
         if self.on_select_callback:
             self.on_select_callback(self.group_name, self.selected)
@@ -248,7 +292,6 @@ class IPTVParser:
             line = line.strip()
             
             if line.startswith('#EXTINF:'):
-                # Kanal bilgilerini çıkar
                 current_channel = IPTVParser._parse_extinf(line)
                 
             elif line.startswith('http') or line.startswith('rtmp'):
@@ -256,7 +299,6 @@ class IPTVParser:
                     current_channel['url'] = line
                     channels.append(current_channel)
                     
-                    # Gruplara ekle
                     group = current_channel.get('group', 'Diğer')
                     if group not in groups:
                         groups[group] = {
@@ -279,27 +321,22 @@ class IPTVParser:
             'duration': -1
         }
         
-        # Grup adını çıkar
         group_match = re.search(r'group-title="([^"]*)"', line)
         if group_match:
             channel['group'] = group_match.group(1) or 'Diğer'
             
-        # Logo URL'sini çıkar
         logo_match = re.search(r'tvg-logo="([^"]*)"', line)
         if logo_match:
             channel['logo'] = logo_match.group(1)
             
-        # TVG-ID'yi çıkar
         tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
         if tvg_id_match:
             channel['tvg_id'] = tvg_id_match.group(1)
             
-        # TVG-Name'i çıkar
         tvg_name_match = re.search(r'tvg-name="([^"]*)"', line)
         if tvg_name_match:
             channel['tvg_name'] = tvg_name_match.group(1)
             
-        # Kanal adını çıkar (satırın sonundaki kısım)
         name_match = re.search(r',(.+)$', line)
         if name_match:
             channel['name'] = name_match.group(1).strip()
@@ -313,18 +350,8 @@ class IPTVParser:
         
         for country, codes in COUNTRY_CODES.items():
             for code in codes:
-                # Tam kelime eşleşmesi veya başlangıç/bitiş kontrolü
-                patterns = [
-                    rf'\b{code}\b',           # Tam kelime
-                    rf'^{code}[:\s_-]',       # Başlangıçta
-                    rf'[:\s_-]{code}$',       # Sonda
-                    rf'\|{code}\|',           # Ayraçlar arasında
-                    rf'\[{code}\]',           # Köşeli parantez içinde
-                    rf'\({code}\)',           # Parantez içinde
-                ]
-                for pattern in patterns:
-                    if re.search(pattern, text):
-                        return country
+                if re.search(rf'\b{code}\b', text):
+                    return country
                         
         return 'other'
     
@@ -334,7 +361,7 @@ class IPTVParser:
         content = '#EXTM3U\n'
         
         for ch in channels:
-            extinf = f'#EXTINF:-1'
+            extinf = '#EXTINF:-1'
             
             if ch.get('tvg_id'):
                 extinf += f' tvg-id="{ch["tvg_id"]}"'
@@ -363,16 +390,12 @@ class IPTVTester:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
             
-            # İlk olarak HEAD isteği dene
             response = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
             
             if response.status_code == 200:
                 return True, "Başarılı"
                 
-            # HEAD başarısız olursa GET dene
             response = requests.get(url, timeout=timeout, headers=headers, stream=True)
-            
-            # İlk birkaç byte'ı oku
             content = next(response.iter_content(1024), None)
             
             if content:
@@ -389,7 +412,7 @@ class IPTVTester:
     
     @staticmethod
     def test_stream(url, timeout=15):
-        """Video akışını test et (daha kapsamlı)"""
+        """Video akışını test et"""
         try:
             headers = {
                 'User-Agent': 'VLC/3.0.11 LibVLC/3.0.11'
@@ -400,19 +423,10 @@ class IPTVTester:
             if response.status_code != 200:
                 return False, f"HTTP {response.status_code}"
             
-            content_type = response.headers.get('Content-Type', '')
-            
-            # Video içerik türlerini kontrol et
-            valid_types = ['video', 'application/octet-stream', 'application/vnd.apple.mpegurl', 
-                          'audio/mpegurl', 'application/x-mpegurl']
-            
-            is_valid_type = any(vt in content_type.lower() for vt in valid_types)
-            
-            # İlk chunk'ı oku
             total_bytes = 0
             for chunk in response.iter_content(chunk_size=8192):
                 total_bytes += len(chunk)
-                if total_bytes > 32768:  # 32KB yeterli
+                if total_bytes > 32768:
                     break
                     
             if total_bytes > 1024:
@@ -428,18 +442,41 @@ class IPTVTester:
             return False, str(e)[:50]
 
 
-# ========================= EKRANLAR =========================
+class BaseScreen(Screen):
+    """Tüm ekranlar için temel sınıf"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._bg_scheduled = False
+        Clock.schedule_once(lambda dt: self._init_bg(), 0)
+    
+    def _init_bg(self):
+        self.bind(pos=self._schedule_bg, size=self._schedule_bg)
+        self._draw_bg()
+    
+    def _schedule_bg(self, *args):
+        if not self._bg_scheduled:
+            self._bg_scheduled = True
+            Clock.schedule_once(lambda dt: self._draw_bg(), 0)
+    
+    def _draw_bg(self):
+        self._bg_scheduled = False
+        def draw():
+            with self.canvas.before:
+                Color(*get_color_from_hex(COLORS['bg_dark']))
+                Rectangle(pos=self.pos, size=self.size)
+        safe_canvas_update(self, draw)
 
-class WelcomeScreen(Screen):
+
+class WelcomeScreen(BaseScreen):
     """Karşılama ekranı"""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.build_ui()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Başlık
         title_layout = BoxLayout(orientation='vertical', size_hint_y=0.4)
@@ -479,7 +516,7 @@ class WelcomeScreen(Screen):
             color=get_color_from_hex(COLORS['text_primary'])
         )
         manual_desc = Label(
-            text='IPTV linkini girin, kanal gruplarını görüntüleyin\nve istediğiniz kanalları seçin',
+            text='IPTV linkini girin, kanal gruplarını\ngörüntüleyin ve istediğiniz kanalları seçin',
             font_size=dp(13),
             color=get_color_from_hex(COLORS['text_secondary']),
             halign='center'
@@ -487,7 +524,7 @@ class WelcomeScreen(Screen):
         manual_desc.bind(size=manual_desc.setter('text_size'))
         
         manual_btn = RoundedButton(
-            text='Başla →',
+            text='Başla',
             size_hint=(0.6, None),
             height=dp(45),
             pos_hint={'center_x': 0.5},
@@ -522,7 +559,7 @@ class WelcomeScreen(Screen):
         auto_desc.bind(size=auto_desc.setter('text_size'))
         
         auto_btn = RoundedButton(
-            text='Başla →',
+            text='Başla',
             size_hint=(0.6, None),
             height=dp(45),
             pos_hint={'center_x': 0.5},
@@ -541,7 +578,7 @@ class WelcomeScreen(Screen):
         
         # Alt bilgi
         footer = Label(
-            text='v1.0.0 • Made with ❤️',
+            text='v2.0.0 • Made with ❤️',
             font_size=dp(12),
             color=get_color_from_hex(COLORS['text_secondary']),
             size_hint_y=0.1
@@ -549,12 +586,6 @@ class WelcomeScreen(Screen):
         layout.add_widget(footer)
         
         self.add_widget(layout)
-        
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
             
     def go_manual(self, instance):
         self.manager.transition = SlideTransition(direction='left')
@@ -565,30 +596,29 @@ class WelcomeScreen(Screen):
         self.manager.current = 'auto_input'
 
 
-class ManualInputScreen(Screen):
+class ManualInputScreen(BaseScreen):
     """Manuel mod - URL giriş ekranı"""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.build_ui()
+        self.selected_format = 'm3u'
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Üst bar
         top_bar = BoxLayout(size_hint_y=None, height=dp(50))
         
         back_btn = RoundedButton(
-            text='← Geri',
+            text='< Geri',
             size_hint=(None, None),
             size=(dp(100), dp(40)),
             bg_color=COLORS['bg_light']
         )
         back_btn.bind(on_press=self.go_back)
         top_bar.add_widget(back_btn)
-        
-        top_bar.add_widget(Label())  # Spacer
+        top_bar.add_widget(Label())
         
         layout.add_widget(top_bar)
         
@@ -661,15 +691,9 @@ class ManualInputScreen(Screen):
         format_buttons = BoxLayout(spacing=dp(10))
         
         self.format_buttons = {}
-        formats = [
-            ('m3u', 'M3U', '⭐ En İyi'),
-            ('m3u8', 'M3U8', '📱 Mobil'),
-            ('txt', 'TXT', '📝 Basit')
-        ]
+        formats = [('m3u', 'M3U'), ('m3u8', 'M3U8'), ('txt', 'TXT')]
         
-        for fmt, name, tag in formats:
-            btn_layout = BoxLayout(orientation='vertical', spacing=dp(5))
-            
+        for fmt, name in formats:
             btn = RoundedButton(
                 text=name,
                 bg_color=COLORS['primary'] if fmt == 'm3u' else COLORS['bg_light']
@@ -677,18 +701,7 @@ class ManualInputScreen(Screen):
             btn.format_type = fmt
             btn.bind(on_press=self.select_format)
             self.format_buttons[fmt] = btn
-            
-            tag_label = Label(
-                text=tag,
-                font_size=dp(10),
-                color=get_color_from_hex(COLORS['success']),
-                size_hint_y=None,
-                height=dp(15)
-            )
-            
-            btn_layout.add_widget(btn)
-            btn_layout.add_widget(tag_label)
-            format_buttons.add_widget(btn_layout)
+            format_buttons.add_widget(btn)
             
         format_inner.add_widget(format_label)
         format_inner.add_widget(format_buttons)
@@ -700,7 +713,7 @@ class ManualInputScreen(Screen):
         
         # İleri butonu
         next_btn = RoundedButton(
-            text='Kanalları Yükle →',
+            text='Kanalları Yükle',
             size_hint=(1, None),
             height=dp(55),
             font_size=dp(18),
@@ -711,14 +724,6 @@ class ManualInputScreen(Screen):
         
         self.add_widget(layout)
         
-        self.selected_format = 'm3u'
-        
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'welcome'
@@ -739,10 +744,7 @@ class ManualInputScreen(Screen):
             self.show_error('Lütfen bir URL girin!')
             return
             
-        # Loading popup
         self.show_loading()
-        
-        # Arka planda yükle
         threading.Thread(target=self._load_playlist, args=(url,), daemon=True).start()
         
     def _load_playlist(self, url):
@@ -761,7 +763,6 @@ class ManualInputScreen(Screen):
     def _on_playlist_loaded(self, channels, groups):
         self.dismiss_loading()
         
-        # Verileri app'e kaydet
         app = App.get_running_app()
         app.channels = channels
         app.groups = groups
@@ -795,8 +796,7 @@ class ManualInputScreen(Screen):
             content=content,
             size_hint=(0.8, 0.4),
             auto_dismiss=False,
-            separator_height=0,
-            background_color=get_color_from_hex(COLORS['card_bg'])
+            separator_height=0
         )
         self.loading_popup.open()
         
@@ -831,8 +831,7 @@ class ManualInputScreen(Screen):
             title='',
             content=content,
             size_hint=(0.85, 0.4),
-            separator_height=0,
-            background_color=get_color_from_hex(COLORS['card_bg'])
+            separator_height=0
         )
         
         close_btn.bind(on_press=popup.dismiss)
@@ -841,7 +840,7 @@ class ManualInputScreen(Screen):
         popup.open()
 
 
-class ChannelListScreen(Screen):
+class ChannelListScreen(BaseScreen):
     """Kanal grupları listesi ekranı"""
     
     def __init__(self, **kwargs):
@@ -850,17 +849,17 @@ class ChannelListScreen(Screen):
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
+        self.selected_groups = set()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Üst bar
         top_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         
         back_btn = RoundedButton(
-            text='←',
+            text='<',
             size_hint=(None, None),
             size=(dp(50), dp(40)),
             bg_color=COLORS['bg_light']
@@ -911,7 +910,6 @@ class ChannelListScreen(Screen):
             item = ChannelGroupItem(
                 group_name=group_name,
                 channel_count=len(group_data['channels']),
-                logo_url=group_data.get('logo'),
                 on_select=self.on_group_select
             )
             self.list_layout.add_widget(item)
@@ -930,7 +928,7 @@ class ChannelListScreen(Screen):
         bottom_bar.add_widget(select_all_btn)
         
         export_btn = RoundedButton(
-            text='Dışa Aktar →',
+            text='Dışa Aktar',
             bg_color=COLORS['success']
         )
         export_btn.bind(on_press=self.export_selected)
@@ -940,12 +938,6 @@ class ChannelListScreen(Screen):
         
         self.add_widget(layout)
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'manual_input'
@@ -959,9 +951,6 @@ class ChannelListScreen(Screen):
         self.selection_label.text = f'Seçilen: {len(self.selected_groups)} grup'
         
     def select_all(self, instance):
-        app = App.get_running_app()
-        groups = getattr(app, 'groups', {})
-        
         for child in self.list_layout.children:
             if isinstance(child, ChannelGroupItem) and not child.selected:
                 child.toggle_selection(None)
@@ -975,25 +964,19 @@ class ChannelListScreen(Screen):
         groups = getattr(app, 'groups', {})
         selected_format = getattr(app, 'selected_format', 'm3u')
         
-        # Seçili kanalları topla
         selected_channels = []
         for group_name in self.selected_groups:
             if group_name in groups:
                 selected_channels.extend(groups[group_name]['channels'])
                 
-        # M3U oluştur
         content = IPTVParser.generate_m3u(selected_channels, selected_format)
-        
-        # Dosyayı kaydet
         self.save_file(content, selected_format)
         
     def save_file(self, content, format_type):
         try:
-            # Android'de Downloads klasörüne kaydet
             from android.storage import primary_external_storage_path
             download_path = os.path.join(primary_external_storage_path(), 'Download')
         except:
-            # Desktop'ta mevcut dizine kaydet
             download_path = os.path.expanduser('~')
             
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1044,22 +1027,22 @@ class ChannelListScreen(Screen):
         popup.open()
 
 
-class AutoInputScreen(Screen):
+class AutoInputScreen(BaseScreen):
     """Otomatik mod - Toplu link giriş ekranı"""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.build_ui()
+        self.test_mode = 'quick'
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Üst bar
         top_bar = BoxLayout(size_hint_y=None, height=dp(50))
         
         back_btn = RoundedButton(
-            text='← Geri',
+            text='< Geri',
             size_hint=(None, None),
             size=(dp(100), dp(40)),
             bg_color=COLORS['bg_light']
@@ -1083,11 +1066,11 @@ class AutoInputScreen(Screen):
         
         # Açıklama
         desc = Label(
-            text='IPTV linklerini her satıra bir tane olacak şekilde girin.\nProgram çalışan linkleri otomatik tespit edecek.',
+            text='IPTV linklerini her satıra bir tane olacak şekilde girin.',
             font_size=dp(13),
             color=get_color_from_hex(COLORS['text_secondary']),
             size_hint_y=None,
-            height=dp(50),
+            height=dp(30),
             halign='center'
         )
         desc.bind(size=desc.setter('text_size'))
@@ -1108,7 +1091,7 @@ class AutoInputScreen(Screen):
         input_label.bind(size=input_label.setter('text_size'))
         
         self.links_input = TextInput(
-            hint_text='https://example1.com/playlist.m3u\nhttps://example2.com/playlist.m3u\n...',
+            hint_text='https://example1.com/playlist.m3u\nhttps://example2.com/playlist.m3u',
             multiline=True,
             font_size=dp(13),
             background_color=get_color_from_hex(COLORS['bg_medium']),
@@ -1171,14 +1154,6 @@ class AutoInputScreen(Screen):
         
         self.add_widget(layout)
         
-        self.test_mode = 'quick'
-        
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'welcome'
@@ -1201,14 +1176,12 @@ class AutoInputScreen(Screen):
             self.show_error('Lütfen en az bir link girin!')
             return
             
-        # Linkleri ayır
         links = [l.strip() for l in links_text.split('\n') if l.strip().startswith('http')]
         
         if not links:
             self.show_error('Geçerli link bulunamadı!')
             return
             
-        # App'e kaydet
         app = App.get_running_app()
         app.links_to_test = links
         app.test_mode = self.test_mode
@@ -1252,7 +1225,7 @@ class AutoInputScreen(Screen):
         popup.open()
 
 
-class TestingScreen(Screen):
+class TestingScreen(BaseScreen):
     """Link test ekranı"""
     
     def __init__(self, **kwargs):
@@ -1263,12 +1236,11 @@ class TestingScreen(Screen):
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
-        self.start_tests()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
+        Clock.schedule_once(lambda dt: self.start_tests(), 0.2)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Başlık
         title = Label(
@@ -1341,12 +1313,6 @@ class TestingScreen(Screen):
         
         self.add_widget(layout)
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def start_tests(self):
         self.testing = True
         self.working_links = []
@@ -1369,7 +1335,6 @@ class TestingScreen(Screen):
             
             Clock.schedule_once(lambda dt, l=link: self.add_log(f'Test ediliyor: {l[:50]}...', 'info'))
             
-            # Test et
             if self.test_mode == 'quick':
                 success, message = IPTVTester.test_link(link)
             else:
@@ -1382,7 +1347,6 @@ class TestingScreen(Screen):
                 self.failed_links.append({'link': link, 'reason': message})
                 Clock.schedule_once(lambda dt, l=link, m=message: self.add_log(f'❌ Başarısız: {l[:30]}... ({m})', 'error'))
                 
-            # UI güncelle
             Clock.schedule_once(self.update_progress)
             
         Clock.schedule_once(self.tests_completed)
@@ -1415,13 +1379,12 @@ class TestingScreen(Screen):
     def tests_completed(self, dt):
         self.testing = False
         self.progress_label.text = 'Test tamamlandı!'
-        self.cancel_btn.text = 'Devam Et →'
+        self.cancel_btn.text = 'Devam Et'
         self.cancel_btn.bg_color = COLORS['success']
         self.cancel_btn.update_canvas()
         self.cancel_btn.unbind(on_press=self.cancel_tests)
         self.cancel_btn.bind(on_press=self.go_next)
         
-        # Sonuçları kaydet
         app = App.get_running_app()
         app.working_links = self.working_links
         app.failed_links = self.failed_links
@@ -1480,19 +1443,18 @@ class TestingScreen(Screen):
         popup.open()
 
 
-class AutoResultScreen(Screen):
-    """Otomatik test sonuç ve düzenleme seçim ekranı"""
+class AutoResultScreen(BaseScreen):
+    """Otomatik test sonuç ekranı"""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         app = App.get_running_app()
         working = len(getattr(app, 'working_links', []))
@@ -1564,7 +1526,6 @@ class AutoResultScreen(Screen):
         )
         layout.add_widget(question)
         
-        # Seçenekler
         # Otomatik düzenleme kartı
         auto_card = StyledCard(size_hint_y=None, height=dp(140))
         auto_inner = BoxLayout(orientation='vertical', spacing=dp(10))
@@ -1591,7 +1552,7 @@ class AutoResultScreen(Screen):
         auto_desc.bind(size=auto_desc.setter('text_size'))
         
         auto_btn = RoundedButton(
-            text='Otomatik →',
+            text='Otomatik',
             size_hint=(0.6, None),
             height=dp(40),
             pos_hint={'center_x': 0.5},
@@ -1631,7 +1592,7 @@ class AutoResultScreen(Screen):
         manual_desc.bind(size=manual_desc.setter('text_size'))
         
         manual_btn = RoundedButton(
-            text='Manuel →',
+            text='Manuel',
             size_hint=(0.6, None),
             height=dp(40),
             pos_hint={'center_x': 0.5},
@@ -1650,7 +1611,7 @@ class AutoResultScreen(Screen):
         
         # Geri butonu
         back_btn = RoundedButton(
-            text='← Geri',
+            text='< Geri',
             size_hint=(1, None),
             height=dp(45),
             bg_color=COLORS['bg_light']
@@ -1660,12 +1621,6 @@ class AutoResultScreen(Screen):
         
         self.add_widget(layout)
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'auto_input'
@@ -1679,7 +1634,7 @@ class AutoResultScreen(Screen):
         self.manager.current = 'manual_edit_list'
 
 
-class CountrySelectScreen(Screen):
+class CountrySelectScreen(BaseScreen):
     """Ülke seçim ekranı"""
     
     def __init__(self, **kwargs):
@@ -1689,17 +1644,16 @@ class CountrySelectScreen(Screen):
     def on_enter(self):
         self.clear_widgets()
         self.selected_countries = set()
-        self.build_ui()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Üst bar
         top_bar = BoxLayout(size_hint_y=None, height=dp(50))
         
         back_btn = RoundedButton(
-            text='←',
+            text='<',
             size_hint=(None, None),
             size=(dp(50), dp(40)),
             bg_color=COLORS['bg_light']
@@ -1742,17 +1696,14 @@ class CountrySelectScreen(Screen):
         self.country_layout = GridLayout(cols=2, spacing=dp(10), size_hint_y=None, padding=dp(5))
         self.country_layout.bind(minimum_height=self.country_layout.setter('height'))
         
-        # Öne çıkan ülkeler (en üstte)
         featured = ['turkey', 'germany', 'romania', 'austria']
         
         self.country_buttons = {}
         
-        # Öne çıkan ülkeleri ekle
         for country in featured:
             btn = self._create_country_button(country, featured=True)
             self.country_layout.add_widget(btn)
             
-        # Diğer ülkeleri ekle
         for country in sorted(COUNTRY_FLAGS.keys()):
             if country not in featured:
                 btn = self._create_country_button(country)
@@ -1779,7 +1730,7 @@ class CountrySelectScreen(Screen):
             width=dp(120)
         )
         format_layout.add_widget(self.format_spinner)
-        format_layout.add_widget(Label())  # Spacer
+        format_layout.add_widget(Label())
         
         layout.add_widget(format_layout)
         
@@ -1838,12 +1789,6 @@ class CountrySelectScreen(Screen):
         instance.update_canvas()
         self.selection_label.text = f'Seçilen: {len(self.selected_countries)} ülke'
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'auto_result'
@@ -1853,7 +1798,6 @@ class CountrySelectScreen(Screen):
             self.show_error('Lütfen en az bir ülke seçin!')
             return
             
-        # İşlemeye başla
         app = App.get_running_app()
         app.selected_countries = self.selected_countries
         app.output_format = self.format_spinner.text.lower()
@@ -1896,7 +1840,7 @@ class CountrySelectScreen(Screen):
         popup.open()
 
 
-class ProcessingScreen(Screen):
+class ProcessingScreen(BaseScreen):
     """İşleme ekranı"""
     
     def __init__(self, **kwargs):
@@ -1904,12 +1848,11 @@ class ProcessingScreen(Screen):
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
-        self.start_processing()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
+        Clock.schedule_once(lambda dt: self.start_processing(), 0.2)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         # Başlık
         title = Label(
@@ -1967,12 +1910,6 @@ class ProcessingScreen(Screen):
         
         self.add_widget(layout)
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def start_processing(self):
         threading.Thread(target=self._process_links, daemon=True).start()
         
@@ -1997,7 +1934,6 @@ class ProcessingScreen(Screen):
                 
                 all_channels.extend(channels)
                 
-                # Ülkeye göre filtrele
                 for ch in channels:
                     group_name = ch.get('group', '')
                     channel_name = ch.get('name', '')
@@ -2017,10 +1953,8 @@ class ProcessingScreen(Screen):
         Clock.schedule_once(lambda dt: self._update_progress(75))
         Clock.schedule_once(lambda dt: self._update_label('Dosya oluşturuluyor...'))
         
-        # Dosya oluştur
         content = IPTVParser.generate_m3u(filtered_channels, output_format)
         
-        # Kaydet
         try:
             from android.storage import primary_external_storage_path
             download_path = os.path.join(primary_external_storage_path(), 'Download')
@@ -2032,8 +1966,11 @@ class ProcessingScreen(Screen):
         filename = f'iptv_{countries_str}_{timestamp}.{output_format}'
         filepath = os.path.join(download_path, filename)
         
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception as e:
+            print(f"Error saving file: {e}")
             
         app.output_filepath = filepath
         app.filtered_channels = filtered_channels
@@ -2059,7 +1996,7 @@ class ProcessingScreen(Screen):
         self.manager.current = 'complete'
 
 
-class ManualEditListScreen(Screen):
+class ManualEditListScreen(BaseScreen):
     """Manuel düzenleme - link listesi"""
     
     def __init__(self, **kwargs):
@@ -2067,11 +2004,10 @@ class ManualEditListScreen(Screen):
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         app = App.get_running_app()
         working_links = getattr(app, 'working_links', [])
@@ -2080,7 +2016,7 @@ class ManualEditListScreen(Screen):
         top_bar = BoxLayout(size_hint_y=None, height=dp(50))
         
         back_btn = RoundedButton(
-            text='←',
+            text='<',
             size_hint=(None, None),
             size=(dp(50), dp(40)),
             bg_color=COLORS['bg_light']
@@ -2142,7 +2078,6 @@ class ManualEditListScreen(Screen):
         # Link bilgisi
         info_layout = BoxLayout(orientation='vertical')
         
-        # URL'den domain çıkar
         domain = urlparse(link).netloc or link[:30]
         
         domain_label = Label(
@@ -2180,12 +2115,6 @@ class ManualEditListScreen(Screen):
         item.add_widget(inner)
         return item
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'auto_result'
@@ -2199,22 +2128,23 @@ class ManualEditListScreen(Screen):
         self.manager.current = 'link_editor'
 
 
-class LinkEditorScreen(Screen):
+class LinkEditorScreen(BaseScreen):
     """Tek link düzenleme ekranı"""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.selected_groups = set()
+        self.channels = []
+        self.groups = {}
         
     def on_enter(self):
         self.clear_widgets()
         self.selected_groups = set()
-        self.build_ui()
-        self.load_link_content()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
+        Clock.schedule_once(lambda dt: self.load_link_content(), 0.2)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         app = App.get_running_app()
         link_index = getattr(app, 'current_edit_index', 1)
@@ -2224,7 +2154,7 @@ class LinkEditorScreen(Screen):
         top_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         
         back_btn = RoundedButton(
-            text='←',
+            text='<',
             size_hint=(None, None),
             size=(dp(50), dp(40)),
             bg_color=COLORS['bg_light']
@@ -2327,7 +2257,6 @@ class LinkEditorScreen(Screen):
             item = ChannelGroupItem(
                 group_name=group_name,
                 channel_count=len(group_data['channels']),
-                logo_url=group_data.get('logo'),
                 on_select=self.on_group_select
             )
             self.list_layout.add_widget(item)
@@ -2343,12 +2272,6 @@ class LinkEditorScreen(Screen):
             
         self.selection_label.text = f'Seçilen: {len(self.selected_groups)} grup'
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def go_back(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'manual_edit_list'
@@ -2358,16 +2281,13 @@ class LinkEditorScreen(Screen):
             self.show_message('Uyarı', 'Lütfen en az bir grup seçin!')
             return
             
-        # Seçili kanalları topla
         selected_channels = []
         for group_name in self.selected_groups:
             if group_name in self.groups:
                 selected_channels.extend(self.groups[group_name]['channels'])
                 
-        # M3U oluştur
         content = IPTVParser.generate_m3u(selected_channels)
         
-        # Kaydet
         try:
             from android.storage import primary_external_storage_path
             download_path = os.path.join(primary_external_storage_path(), 'Download')
@@ -2380,10 +2300,12 @@ class LinkEditorScreen(Screen):
         filename = f'iptv_link{link_index}_{timestamp}.m3u'
         filepath = os.path.join(download_path, filename)
         
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-            
-        self.show_save_success(filepath)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.show_save_success(filepath)
+        except Exception as e:
+            self.show_message('Hata', f'Kaydetme hatası: {str(e)}')
         
     def show_message(self, title, message):
         content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
@@ -2468,7 +2390,7 @@ class LinkEditorScreen(Screen):
         popup.open()
 
 
-class CompleteScreen(Screen):
+class CompleteScreen(BaseScreen):
     """İşlem tamamlandı ekranı"""
     
     def __init__(self, **kwargs):
@@ -2476,11 +2398,10 @@ class CompleteScreen(Screen):
         
     def on_enter(self):
         self.clear_widgets()
-        self.build_ui()
+        Clock.schedule_once(lambda dt: self.build_ui(), 0.1)
         
     def build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
-        layout.bind(pos=self.update_bg, size=self.update_bg)
         
         app = App.get_running_app()
         filepath = getattr(app, 'output_filepath', '')
@@ -2520,7 +2441,7 @@ class CompleteScreen(Screen):
         result_inner.add_widget(file_label)
         
         path_label = Label(
-            text=os.path.basename(filepath),
+            text=os.path.basename(filepath) if filepath else 'Bilinmiyor',
             font_size=dp(12),
             color=get_color_from_hex(COLORS['primary'])
         )
@@ -2557,12 +2478,6 @@ class CompleteScreen(Screen):
         
         self.add_widget(layout)
         
-    def update_bg(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*get_color_from_hex(COLORS['bg_dark']))
-            Rectangle(pos=self.pos, size=self.size)
-            
     def new_process(self, instance):
         self.manager.transition = SlideTransition(direction='right')
         self.manager.current = 'auto_input'
