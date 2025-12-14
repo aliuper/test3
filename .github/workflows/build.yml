@@ -7,13 +7,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # EN KRİTİK DEĞİŞİKLİK: 20.04 en kararlı sürümdür.
+    runs-on: ubuntu-22.04 # DÜZELTME: 20.04 yerine 22.04 (Hızlı ve Uyumlu)
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Eski hatalı derleme artıklarını temizle
       - name: Clean Buildozer Cache
         run: rm -rf .buildozer bin
 
@@ -41,7 +40,7 @@ jobs:
       - name: Install buildozer dependencies
         run: |
           pip install --upgrade pip
-          pip install "cython<3.0.0"  # Cython 3.0 bazen hata verir, eski sürüme sabitliyoruz
+          pip install "cython<3.0.0"
           pip install buildozer
 
       - name: Build APK
@@ -49,7 +48,6 @@ jobs:
           yes | buildozer -v android debug
         env:
           BUILDOZER_WARN_ON_ROOT: 1
-          # Java yollarını garantiye alalım
           JAVA_HOME: ${{ steps.setup-java.outputs.path }}
 
       - name: Upload APK
